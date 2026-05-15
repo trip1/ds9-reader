@@ -11,18 +11,18 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.ds9reader.domain.LibraryRepository
+import com.example.ds9reader.platform.openReader
+import org.koin.compose.koinInject
 
 /**
- * Reader screen — will be backed by Readium navigator.
- * Currently a placeholder until Readium integration.
- *
- * Note: Readium navigator is Android-only. On iOS/Desktop
- * we'll need an alternative renderer (e.g. EPUB.js via WebView,
- * or a custom Compose reader).
+ * Reader screen — launches the platform-specific EPUB reader.
+ * On Android, this opens the ReadingActivity with the Readium navigator.
+ * On Desktop, this shows a placeholder until a custom reader is implemented.
  */
 data class ReaderScreen(
     val bookId: String,
@@ -30,62 +30,104 @@ data class ReaderScreen(
 
     override val key = uniqueScreenKey
 
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val repository = koinInject<LibraryRepository>()
+        
+        var filePath by remember { mutableStateOf<String?>(null) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var launched by remember { mutableStateOf(false) }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Reading") },
-                    navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* TODO: bookmarks */ }) {
-                            Icon(
-                                Icons.Default.FavoriteBorder,
-                                contentDescription = "Bookmark"
-                            )
-                        }
-                        IconButton(onClick = { /* TODO: settings */ }) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "Settings"
-                            )
-                        }
-                    }
-                )
+        LaunchedEffect(bookId) {
+            repository.getBook(bookId).fold(
+                ifRight = { book ->
+                    filePath = book.filePath
+                },
+                ifLeft = { err ->
+                    error = "Failed to load book: $err"
+                }
+            )
+        }
+
+        LaunchedEffect(filePath) {
+            if (filePath != null && !launched) {
+                launched = true
+                openReader(this@ReaderScreen, filePath!!)
             }
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = "📖",
-                    style = MaterialTheme.typography.displayLarge,
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Reader coming soon",
-                    style = MaterialTheme.typography.headlineSmall,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Readium navigator will be integrated here",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        }
+
+        ReaderScreenContent(
+            isLoading = filePath == null && error == null,
+            error = error,
+            onBack = { navigator.pop() },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReaderScreenContent(
+    isLoading: Boolean,
+    error: String?,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Reading") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { /* TODO: bookmarks */ }) {
+                        Icon(
+                            Icons.Default.FavoriteBorder,
+                            contentDescription = "Bookmark"
+                        )
+                    }
+                    IconButton(onClick = { /* TODO: settings */ }) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                isLoading -> {
+                    CircularProgressIndicator()
+                }
+                error != null -> {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = "❌",
+                            style = MaterialTheme.typography.displayLarge,
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
     }

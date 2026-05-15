@@ -66,8 +66,10 @@ kotlin {
             dependencies {
                 implementation(compose.preview)
                 implementation(libs.androidx.activity.compose)
+                implementation(libs.androidx.fragment.ktx)
                 implementation(libs.sqldelight.android.driver)
                 implementation(libs.readium.navigator)
+                implementation(libs.readium.server)
                 implementation(libs.koin.android)
                 implementation(libs.koin.androidx.compose)
             }
