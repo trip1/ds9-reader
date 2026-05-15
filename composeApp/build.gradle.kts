@@ -1,19 +1,15 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.sqldelight)
 }
 
 kotlin {
-    androidTarget {
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
-        }
-    }
+    androidTarget()
 
     listOf(
         iosX64(),
@@ -29,25 +25,78 @@ kotlin {
     jvm("desktop")
 
     sourceSets {
-        val desktopMain by getting
+        val commonMain by getting {
+            dependencies {
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material3)
+                implementation(compose.ui)
+                implementation(compose.components.resources)
+                implementation(compose.components.uiToolingPreview)
 
-        androidMain.dependencies {
-            implementation(compose.preview)
-            implementation(libs.androidx.activity.compose)
+                // Arrow
+                implementation(libs.arrow.core)
+                implementation(libs.arrow.fx.coroutines)
+
+                // SQLDelight runtime
+                implementation(libs.sqldelight.runtime)
+                implementation(libs.sqldelight.coroutines)
+
+                // Voyager navigation
+                implementation(libs.voyager.navigator)
+                implementation(libs.voyager.screenmodel)
+                implementation(libs.voyager.transitions)
+
+                // Readium core
+                implementation(libs.readium.shared)
+                implementation(libs.readium.streamer)
+
+                // Koin DI
+                implementation(libs.koin.core)
+                implementation(libs.koin.compose)
+                implementation(libs.koin.compose.viewmodel)
+
+                // Kotlinx
+                implementation(libs.kotlinx.coroutines)
+                implementation(libs.kotlinx.datetime)
+            }
         }
-        commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
+
+        val androidMain by getting {
+            dependencies {
+                implementation(compose.preview)
+                implementation(libs.androidx.activity.compose)
+                implementation(libs.sqldelight.android.driver)
+                implementation(libs.readium.navigator)
+                implementation(libs.koin.android)
+                implementation(libs.koin.androidx.compose)
+            }
         }
-        desktopMain.dependencies {
-            implementation(compose.desktop.currentOs)
+
+        val desktopMain by getting {
+            dependencies {
+                implementation(compose.desktop.currentOs)
+                implementation(libs.sqldelight.sqlite.driver)
+            }
         }
-        commonTest.dependencies {
-            implementation(libs.kotlin.test)
+
+        // iOS nativeMain — shared across all iOS targets
+        val nativeMain by creating {
+            dependsOn(commonMain)
+        }
+
+        val iosX64Main by getting { dependsOn(nativeMain) }
+        val iosArm64Main by getting { dependsOn(nativeMain) }
+        val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
+
+        nativeMain.dependencies {
+            implementation(libs.sqldelight.native.driver)
+        }
+
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+            }
         }
     }
 }
@@ -91,6 +140,14 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "com.example.ds9reader"
             packageVersion = "1.0.0"
+        }
+    }
+}
+
+sqldelight {
+    databases {
+        create("LibraryDatabase") {
+            packageName.set("com.example.ds9reader.database")
         }
     }
 }

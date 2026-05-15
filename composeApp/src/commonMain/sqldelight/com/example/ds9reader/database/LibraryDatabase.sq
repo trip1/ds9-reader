@@ -1,0 +1,77 @@
+-- Library database for tracking books, reading progress, and metadata
+
+CREATE TABLE Book (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    cover_url TEXT,
+    file_path TEXT NOT NULL,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_opened_at TEXT,
+    progress REAL NOT NULL DEFAULT 0.0,
+    current_chapter INTEGER NOT NULL DEFAULT 0,
+    total_chapters INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE Bookmark (
+    id TEXT NOT NULL PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES Book(id) ON DELETE CASCADE,
+    chapter_index INTEGER NOT NULL,
+    cfi TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE ReadingSession (
+    id TEXT NOT NULL PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES Book(id) ON DELETE CASCADE,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    start_cfi TEXT NOT NULL,
+    end_cfi TEXT,
+    duration_seconds INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_bookmark_book ON Bookmark(book_id);
+CREATE INDEX idx_session_book ON ReadingSession(book_id);
+CREATE INDEX idx_book_added ON Book(added_at);
+CREATE INDEX idx_book_last_opened ON Book(last_opened_at);
+
+selectAllBooks:
+SELECT * FROM Book ORDER BY last_opened_at DESC, added_at DESC;
+
+insertBook:
+INSERT OR REPLACE INTO Book (id, title, author, cover_url, file_path, file_size, added_at, progress, current_chapter, total_chapters)
+VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?);
+
+updateBookProgress:
+UPDATE Book SET progress = ?, current_chapter = ?, last_opened_at = datetime('now')
+WHERE id = ?;
+
+getBookById:
+SELECT * FROM Book WHERE id = ?;
+
+deleteBook:
+DELETE FROM Book WHERE id = ?;
+
+getBookmarksForBook:
+SELECT * FROM Bookmark WHERE book_id = ? ORDER BY created_at DESC;
+
+insertBookmark:
+INSERT INTO Bookmark (id, book_id, chapter_index, cfi, label, created_at)
+VALUES (?, ?, ?, ?, ?, datetime('now'));
+
+deleteBookmark:
+DELETE FROM Bookmark WHERE id = ?;
+
+insertSession:
+INSERT INTO ReadingSession (id, book_id, started_at, start_cfi)
+VALUES (?, ?, datetime('now'), ?);
+
+endSession:
+UPDATE ReadingSession SET ended_at = datetime('now'), end_cfi = ?, duration_seconds = ?
+WHERE id = ?;
+
+getRecentSessions:
+SELECT * FROM ReadingSession ORDER BY started_at DESC LIMIT 10;
