@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ds9reader.domain.FilePicker
 import com.example.ds9reader.domain.PickerResult
+import java.io.File
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * Android file picker implementation using Activity Result Contracts.

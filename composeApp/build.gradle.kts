@@ -51,9 +51,8 @@ kotlin {
                 implementation(libs.voyager.screenmodel)
                 implementation(libs.voyager.transitions)
 
-                // Readium core
+                // Readium core (shared types — multiplatform)
                 implementation(libs.readium.shared)
-                implementation(libs.readium.streamer)
 
                 // Koin DI
                 implementation(libs.koin.core)
@@ -72,6 +71,7 @@ kotlin {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.fragment.ktx)
                 implementation(libs.sqldelight.android.driver)
+                implementation(libs.readium.streamer)
                 implementation(libs.readium.navigator)
                 implementation(libs.koin.android)
                 implementation(libs.koin.androidx.compose)
