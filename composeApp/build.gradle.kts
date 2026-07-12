@@ -76,6 +76,9 @@ kotlin {
                 implementation(libs.ktor.serialization.json)
 
                 implementation(libs.okio)
+
+                implementation(libs.coil.compose)
+                implementation(libs.coil.network.ktor)
             }
         }
 
@@ -137,8 +140,8 @@ android {
         applicationId = "com.example.ds9reader"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
     }
     packaging {
         resources {

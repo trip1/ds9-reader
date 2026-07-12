@@ -14,16 +14,37 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import arrow.core.Either
 
+enum class LibrarySort {
+    Title,
+    Author,
+}
+
 data class HomeUiState(
     val isLoading: Boolean = true,
     val books: List<Book> = emptyList(),
     val continueReading: List<Book> = emptyList(),
     val config: CalibreConfig = CalibreConfig(),
+    val sort: LibrarySort = LibrarySort.Title,
     val statusMessage: String? = null,
     val error: String? = null,
     val isSyncing: Boolean = false,
     val downloadingIds: Set<String> = emptySet(),
-)
+) {
+    val sortedBooks: List<Book>
+        get() = when (sort) {
+            LibrarySort.Title -> books.sortedWith { a, b ->
+                val titleCmp = a.title.ifBlank { "Untitled" }.compareTo(b.title.ifBlank { "Untitled" }, ignoreCase = true)
+                if (titleCmp != 0) titleCmp
+                else a.author.compareTo(b.author, ignoreCase = true)
+            }
+            LibrarySort.Author -> books.sortedWith { a, b ->
+                val authorCmp = a.author.ifBlank { "Unknown author" }
+                    .compareTo(b.author.ifBlank { "Unknown author" }, ignoreCase = true)
+                if (authorCmp != 0) authorCmp
+                else a.title.compareTo(b.title, ignoreCase = true)
+            }
+        }
+}
 
 class HomeScreenModel(
     private val repository: LibraryRepository,
@@ -66,6 +87,10 @@ class HomeScreenModel(
         }
     }
 
+    fun setSort(sort: LibrarySort) {
+        _uiState.update { it.copy(sort = sort) }
+    }
+
     fun saveConfig(config: CalibreConfig) {
         screenModelScope.launch {
             when (val result = repository.saveCalibreConfig(config)) {
@@ -79,7 +104,7 @@ class HomeScreenModel(
 
     fun syncLibrary() {
         screenModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, error = null, statusMessage = "Syncing with Calibre…") }
+            _uiState.update { it.copy(isSyncing = true, error = null, statusMessage = "Syncing with Calibre...") }
             when (val result = syncUseCase.syncLibrary()) {
                 is Either.Left -> {
                     _uiState.update {
@@ -116,7 +141,7 @@ class HomeScreenModel(
                     _uiState.update {
                         it.copy(
                             downloadingIds = it.downloadingIds - bookId,
-                            statusMessage = "Downloaded “${result.value.title}”",
+                            statusMessage = "Downloaded \"${result.value.title}\"",
                         )
                     }
                     refresh()
