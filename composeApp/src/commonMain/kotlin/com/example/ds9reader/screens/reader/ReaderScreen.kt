@@ -5,13 +5,12 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -43,6 +42,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
@@ -61,6 +64,7 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import arrow.core.Either
 import kotlin.math.abs
+import kotlin.math.max
 
 data class ReaderScreen(
     val bookId: String,
@@ -80,6 +84,9 @@ data class ReaderScreen(
         var book by remember { mutableStateOf<Book?>(null) }
         var document by remember { mutableStateOf<EpubDocument?>(null) }
         var chapterIndex by remember { mutableIntStateOf(0) }
+        var pageIndex by remember { mutableIntStateOf(0) }
+        var pageCount by remember { mutableIntStateOf(1) }
+        var preferLastPage by remember { mutableStateOf(false) }
         var fontScale by remember { mutableFloatStateOf(1f) }
         var showToc by remember { mutableStateOf(false) }
         var showFont by remember { mutableStateOf(false) }
@@ -102,26 +109,34 @@ data class ReaderScreen(
                     book = b
                     document = doc
                     chapterIndex = b.currentSpineIndex.coerceIn(0, (doc.chapters.size - 1).coerceAtLeast(0))
+                    pageIndex = 0
+                    preferLastPage = false
                     loading = false
                 }
             }
         }
 
-        LaunchedEffect(chapterIndex, document, book) {
+        LaunchedEffect(chapterIndex, pageIndex, pageCount, document, book) {
             val b = book ?: return@LaunchedEffect
             val doc = document ?: return@LaunchedEffect
             if (doc.chapters.isEmpty()) return@LaunchedEffect
-            val progress = if (doc.chapters.size <= 1) {
-                0f
+            val chapterCount = doc.chapters.size
+            val safePageCount = pageCount.coerceAtLeast(1)
+            val safePageIndex = pageIndex.coerceIn(0, safePageCount - 1)
+            val chapterProgress = (safePageIndex + 1).toFloat() / safePageCount.toFloat()
+            val progress = if (chapterCount <= 1) {
+                chapterProgress
             } else {
-                chapterIndex.toFloat() / (doc.chapters.size - 1).toFloat()
+                val base = chapterIndex.toFloat() / chapterCount.toFloat()
+                val span = 1f / chapterCount.toFloat()
+                base + span * chapterProgress
             }
             val chapter = doc.chapters[chapterIndex.coerceIn(0, doc.chapters.lastIndex)]
             repository.updateProgress(
                 bookId = b.id,
                 progress = progress.coerceIn(0f, 1f),
                 spineIndex = chapterIndex,
-                anchor = chapter.href,
+                anchor = "${chapter.href}#p$safePageIndex",
             )
             delay(1200)
             sync.pushProgress(b.id)
@@ -133,6 +148,9 @@ data class ReaderScreen(
             book = book,
             document = document,
             chapterIndex = chapterIndex,
+            pageIndex = pageIndex,
+            pageCount = pageCount,
+            preferLastPage = preferLastPage,
             fontScale = fontScale,
             controlsVisible = controlsVisible,
             showToc = showToc,
@@ -144,20 +162,47 @@ data class ReaderScreen(
                 }
             },
             onToggleControls = { controlsVisible = !controlsVisible },
-            onPrev = { if (chapterIndex > 0) chapterIndex -= 1 },
-            onNext = {
-                val max = document?.chapters?.lastIndex ?: 0
-                if (chapterIndex < max) chapterIndex += 1
+            onPrevPage = {
+                if (pageIndex > 0) {
+                    pageIndex -= 1
+                    preferLastPage = false
+                } else if (chapterIndex > 0) {
+                    chapterIndex -= 1
+                    preferLastPage = true
+                }
+            },
+            onNextPage = {
+                if (pageIndex < pageCount - 1) {
+                    pageIndex += 1
+                    preferLastPage = false
+                } else {
+                    val maxChapter = document?.chapters?.lastIndex ?: 0
+                    if (chapterIndex < maxChapter) {
+                        chapterIndex += 1
+                        pageIndex = 0
+                        preferLastPage = false
+                    }
+                }
             },
             onOpenToc = { showToc = true },
             onCloseToc = { showToc = false },
             onSelectChapter = {
                 chapterIndex = it
+                pageIndex = 0
+                preferLastPage = false
                 showToc = false
             },
             onOpenFont = { showFont = true },
             onCloseFont = { showFont = false },
-            onFontScale = { fontScale = it },
+            onFontScale = {
+                fontScale = it
+                pageIndex = 0
+                preferLastPage = false
+            },
+            onPaginationChanged = { newPageCount, desiredIndex ->
+                pageCount = newPageCount
+                pageIndex = desiredIndex
+            },
         )
     }
 }
@@ -170,20 +215,24 @@ private fun ReaderContent(
     book: Book?,
     document: EpubDocument?,
     chapterIndex: Int,
+    pageIndex: Int,
+    pageCount: Int,
+    preferLastPage: Boolean,
     fontScale: Float,
     controlsVisible: Boolean,
     showToc: Boolean,
     showFont: Boolean,
     onBack: () -> Unit,
     onToggleControls: () -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     onOpenToc: () -> Unit,
     onCloseToc: () -> Unit,
     onSelectChapter: (Int) -> Unit,
     onOpenFont: () -> Unit,
     onCloseFont: () -> Unit,
     onFontScale: (Float) -> Unit,
+    onPaginationChanged: (pageCount: Int, pageIndex: Int) -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -192,7 +241,7 @@ private fun ReaderContent(
                 TopAppBar(
                     title = {
                         Column {
-                            Text(book?.title ?: "Reading", maxLines = 1)
+                            Text(book?.title ?: "Reading", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             val chapterTitle = document?.chapters?.getOrNull(chapterIndex)?.title
                             if (chapterTitle != null) {
                                 Text(
@@ -200,6 +249,7 @@ private fun ReaderContent(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
@@ -262,73 +312,119 @@ private fun ReaderContent(
                     },
                 )
                 document != null -> {
+                    val chapterCount = document.chapters.size.coerceAtLeast(1)
                     val chapter = document.chapters.getOrNull(chapterIndex)
-                    val progress = if (document.chapters.size <= 1) {
-                        if (chapter == null) 0f else 1f
-                    } else {
-                        chapterIndex.toFloat() / (document.chapters.size - 1).toFloat()
-                    }
+                    val chapterText = chapter?.html.orEmpty()
                     val density = LocalDensity.current
-                    val swipeThresholdPx = with(density) { 64.dp.toPx() }
-                    val scrollState = rememberScrollState()
-
-                    // Reset vertical scroll when chapter changes.
-                    LaunchedEffect(chapterIndex) {
-                        scrollState.scrollTo(0)
+                    val swipeThresholdPx = with(density) { 56.dp.toPx() }
+                    val textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = (18f * fontScale).sp,
+                        lineHeight = (28f * fontScale).sp,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                    val textMeasurer = rememberTextMeasurer()
+                    val canPrev = chapterIndex > 0 || pageIndex > 0
+                    val canNext = chapterIndex < chapterCount - 1 || pageIndex < pageCount - 1
+                    val overallProgress = if (chapterCount <= 0) {
+                        0f
+                    } else {
+                        val safePageCount = pageCount.coerceAtLeast(1)
+                        val safePageIndex = pageIndex.coerceIn(0, safePageCount - 1)
+                        val chapterProgress = (safePageIndex + 1).toFloat() / safePageCount.toFloat()
+                        val base = chapterIndex.toFloat() / chapterCount.toFloat()
+                        val span = 1f / chapterCount.toFloat()
+                        base + span * chapterProgress
                     }
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         if (controlsVisible) {
                             LinearProgressIndicator(
-                                progress = { progress.coerceIn(0f, 1f) },
+                                progress = { overallProgress.coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
 
-                        Box(
+                        BoxWithConstraints(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth()
-                                .pointerInput(chapterIndex) {
-                                    detectTapGestures { offset ->
-                                        val third = size.width / 3f
-                                        when {
-                                            offset.x < third -> onPrev()
-                                            offset.x > size.width - third -> onNext()
-                                            else -> onToggleControls()
+                                .fillMaxWidth(),
+                        ) {
+                            val contentWidthPx = with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1)
+                            val contentHeightPx = with(density) { maxHeight.toPx() }.toInt().coerceAtLeast(1)
+                            val horizontalPadPx = with(density) { 22.dp.toPx() }.toInt()
+                            val verticalPadPx = with(density) { 18.dp.toPx() }.toInt()
+                            val usableWidth = (contentWidthPx - horizontalPadPx * 2).coerceAtLeast(1)
+                            val usableHeight = (contentHeightPx - verticalPadPx * 2).coerceAtLeast(1)
+
+                            val pages = remember(
+                                chapterText,
+                                fontScale,
+                                usableWidth,
+                                usableHeight,
+                                textStyle.fontSize,
+                                textStyle.lineHeight,
+                            ) {
+                                paginateText(
+                                    text = chapterText,
+                                    style = textStyle,
+                                    maxWidthPx = usableWidth,
+                                    maxHeightPx = usableHeight,
+                                    textMeasurer = textMeasurer,
+                                )
+                            }
+                            val computedCount = pages.size.coerceAtLeast(1)
+                            val desiredIndex = if (preferLastPage) {
+                                computedCount - 1
+                            } else {
+                                pageIndex.coerceIn(0, computedCount - 1)
+                            }
+
+                            LaunchedEffect(computedCount, desiredIndex, chapterIndex, fontScale, preferLastPage) {
+                                if (computedCount != pageCount || desiredIndex != pageIndex) {
+                                    onPaginationChanged(computedCount, desiredIndex)
+                                }
+                            }
+
+                            val safeIndex = pageIndex.coerceIn(0, computedCount - 1)
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 22.dp, vertical = 18.dp)
+                                    .pointerInput(chapterIndex, safeIndex, computedCount) {
+                                        detectTapGestures { offset ->
+                                            val third = size.width / 3f
+                                            when {
+                                                offset.x < third -> onPrevPage()
+                                                offset.x > size.width - third -> onNextPage()
+                                                else -> onToggleControls()
+                                            }
                                         }
                                     }
-                                }
-                                .pointerInput(chapterIndex) {
-                                    var totalDrag = 0f
-                                    detectHorizontalDragGestures(
-                                        onDragStart = { totalDrag = 0f },
-                                        onHorizontalDrag = { change, dragAmount ->
-                                            totalDrag += dragAmount
-                                            change.consume()
-                                        },
-                                        onDragEnd = {
-                                            if (abs(totalDrag) >= swipeThresholdPx) {
-                                                // Swipe left (negative) -> next page
-                                                // Swipe right (positive) -> previous page
-                                                if (totalDrag < 0f) onNext() else onPrev()
-                                            }
-                                            totalDrag = 0f
-                                        },
-                                        onDragCancel = { totalDrag = 0f },
-                                    )
-                                }
-                                .verticalScroll(scrollState)
-                                .padding(horizontal = 22.dp, vertical = 18.dp),
-                        ) {
-                            Text(
-                                text = chapter?.html.orEmpty(),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontSize = (18f * fontScale).sp,
-                                    lineHeight = (30f * fontScale).sp,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                ),
-                            )
+                                    .pointerInput(chapterIndex, safeIndex, computedCount) {
+                                        var totalDrag = 0f
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { totalDrag = 0f },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                totalDrag += dragAmount
+                                                change.consume()
+                                            },
+                                            onDragEnd = {
+                                                if (abs(totalDrag) >= swipeThresholdPx) {
+                                                    if (totalDrag < 0f) onNextPage() else onPrevPage()
+                                                }
+                                                totalDrag = 0f
+                                            },
+                                            onDragCancel = { totalDrag = 0f },
+                                        )
+                                    },
+                            ) {
+                                Text(
+                                    text = pages.getOrElse(safeIndex) { "" },
+                                    style = textStyle,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
 
                         if (controlsVisible) {
@@ -340,18 +436,22 @@ private fun ReaderContent(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    TextButton(onClick = onPrev, enabled = chapterIndex > 0) {
+                                    TextButton(onClick = onPrevPage, enabled = canPrev) {
                                         Text("Previous")
                                     }
-                                    Text(
-                                        text = "${chapterIndex + 1} / ${document.chapters.size}",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    TextButton(
-                                        onClick = onNext,
-                                        enabled = chapterIndex < document.chapters.lastIndex,
-                                    ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "Ch ${chapterIndex + 1} / $chapterCount",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            text = "Page ${pageIndex + 1} / ${pageCount.coerceAtLeast(1)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    TextButton(onClick = onNextPage, enabled = canNext) {
                                         Text("Next")
                                     }
                                 }
@@ -362,4 +462,88 @@ private fun ReaderContent(
             }
         }
     }
+}
+
+/**
+ * Split plain chapter text into fixed screen pages that fit without scrolling.
+ */
+private fun paginateText(
+    text: String,
+    style: TextStyle,
+    maxWidthPx: Int,
+    maxHeightPx: Int,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+): List<String> {
+    val cleaned = text
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .trim()
+    if (cleaned.isEmpty()) return listOf("")
+
+    val sample = textMeasurer.measure(
+        text = "Ag",
+        style = style,
+        constraints = Constraints(maxWidth = maxWidthPx),
+    )
+    val lineHeight = sample.size.height.coerceAtLeast(1)
+    val maxLines = max(1, maxHeightPx / lineHeight)
+
+    val paragraphs = cleaned.split('\n')
+    val lines = mutableListOf<String>()
+    for (paragraph in paragraphs) {
+        if (paragraph.isBlank()) {
+            lines += ""
+            continue
+        }
+        val words = paragraph.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) {
+            lines += ""
+            continue
+        }
+        var current = words.first()
+        for (i in 1 until words.size) {
+            val candidate = "$current ${words[i]}"
+            val measured = textMeasurer.measure(
+                text = candidate,
+                style = style,
+                constraints = Constraints(maxWidth = maxWidthPx),
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
+            )
+            if (measured.lineCount > 1) {
+                lines += current
+                current = words[i]
+            } else {
+                current = candidate
+            }
+        }
+        lines += current
+    }
+
+    if (lines.isEmpty()) return listOf("")
+
+    val pages = mutableListOf<String>()
+    var index = 0
+    while (index < lines.size) {
+        var packEnd = (index + maxLines).coerceAtMost(lines.size)
+        while (packEnd > index) {
+            val pageText = lines.subList(index, packEnd).joinToString("\n")
+            val measured = textMeasurer.measure(
+                text = pageText,
+                style = style,
+                constraints = Constraints(maxWidth = maxWidthPx),
+            )
+            if (measured.size.height <= maxHeightPx || packEnd == index + 1) {
+                pages += pageText
+                index = packEnd
+                break
+            }
+            packEnd -= 1
+        }
+        if (packEnd == index) {
+            pages += lines[index]
+            index += 1
+        }
+    }
+    return pages.ifEmpty { listOf("") }
 }
