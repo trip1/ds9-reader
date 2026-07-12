@@ -164,12 +164,13 @@ data class MainScreen(
                 MainTab.Downloaded -> {
                     SimpleBookListContent(
                         title = "Downloaded",
-                        subtitle = "Books available offline",
+                        subtitle = "Books available offline. Delete removes the local file only.",
                         books = state.downloadedBooks,
                         state = state,
                         model = model,
                         emptyText = "No downloaded books yet. Sync your library and download titles from Library.",
                         contentPadding = padding,
+                        showDelete = true,
                         onOpenBook = { book ->
                             navigator.push(ReaderScreen(book.id))
                         },

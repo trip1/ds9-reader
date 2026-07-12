@@ -47,6 +47,20 @@ class IosBookStorage : BookStorage {
         )
     }
 
+
+    override suspend fun deleteEpub(path: String): Either<LibraryError, Unit> {
+        return runCatching {
+            val fm = NSFileManager.defaultManager
+            if (fm.fileExistsAtPath(path)) {
+                val ok = fm.removeItemAtPath(path, null)
+                if (!ok) error("Unable to delete file: $path")
+            }
+        }.fold(
+            onSuccess = { Unit.right() },
+            onFailure = { LibraryError.Storage(it.message ?: "Unable to delete EPUB").left() },
+        )
+    }
+
     override suspend fun listLocalEpubs(directoryHint: String?): Either<LibraryError, List<String>> {
         return runCatching {
             val fm = NSFileManager.defaultManager

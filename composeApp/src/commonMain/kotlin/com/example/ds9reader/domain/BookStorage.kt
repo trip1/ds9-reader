@@ -14,6 +14,11 @@ interface BookStorage {
     suspend fun loadEpub(path: String): Either<LibraryError, ByteArray>
 
     /**
+     * Delete a previously saved EPUB. Missing files are treated as success.
+     */
+    suspend fun deleteEpub(path: String): Either<LibraryError, Unit>
+
+    /**
      * Optional local filesystem import path (desktop/android). Returns empty list on web.
      */
     suspend fun listLocalEpubs(directoryHint: String? = null): Either<LibraryError, List<String>>

@@ -149,7 +149,10 @@ fun LibraryTabContent(
                                 book = book,
                                 config = state.config,
                                 downloading = book.id in state.downloadingIds,
+                                deleting = book.id in state.deletingIds,
+                                showDelete = book.isDownloaded,
                                 onOpen = { onOpenBook(book) },
+                                onDelete = { model.deleteDownload(book.id) },
                             )
                         }
                     }
@@ -169,6 +172,7 @@ fun SimpleBookListContent(
     emptyText: String,
     contentPadding: PaddingValues,
     onOpenBook: (Book) -> Unit,
+    showDelete: Boolean = false,
 ) {
     Column(
         modifier = Modifier
@@ -214,7 +218,10 @@ fun SimpleBookListContent(
                             book = book,
                             config = state.config,
                             downloading = book.id in state.downloadingIds,
+                            deleting = book.id in state.deletingIds,
+                            showDelete = showDelete && book.isDownloaded,
                             onOpen = { onOpenBook(book) },
+                            onDelete = { model.deleteDownload(book.id) },
                         )
                     }
                 }
@@ -334,7 +341,10 @@ fun BookRow(
     book: Book,
     config: CalibreConfig,
     downloading: Boolean,
+    deleting: Boolean = false,
+    showDelete: Boolean = false,
     onOpen: () -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -389,14 +399,28 @@ fun BookRow(
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                FilledTonalButton(onClick = onOpen) {
-                    Text(
-                        when {
-                            downloading -> "Downloading..."
-                            book.isDownloaded -> "Continue"
-                            else -> "Download"
-                        },
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = onOpen,
+                        enabled = !downloading && !deleting,
+                    ) {
+                        Text(
+                            when {
+                                downloading -> "Downloading..."
+                                deleting -> "Removing..."
+                                book.isDownloaded -> "Continue"
+                                else -> "Download"
+                            },
+                        )
+                    }
+                    if (showDelete && book.isDownloaded && onDelete != null) {
+                        TextButton(
+                            onClick = onDelete,
+                            enabled = !downloading && !deleting,
+                        ) {
+                            Text(if (deleting) "Removing..." else "Delete")
+                        }
+                    }
                 }
             }
         }

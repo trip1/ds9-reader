@@ -119,6 +119,11 @@ class SqlLibraryRepository(
         runCatching { db.markDownloaded(file_path = filePath, file_size = fileSize, id = bookId) }.toUnitEither()
     }
 
+    override suspend fun clearDownloaded(bookId: String): Either<LibraryError, Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching { db.clearDownloaded(bookId) }.toUnitEither()
+        }
+
     override suspend fun getBookmarks(bookId: String): Either<LibraryError, List<Bookmark>> =
         withContext(Dispatchers.IO) {
             runCatching {

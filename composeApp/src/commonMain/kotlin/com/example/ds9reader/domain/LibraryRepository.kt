@@ -18,6 +18,7 @@ interface LibraryRepository {
         anchor: String,
     ): Either<LibraryError, Unit>
     suspend fun markDownloaded(bookId: String, filePath: String, fileSize: Long): Either<LibraryError, Unit>
+    suspend fun clearDownloaded(bookId: String): Either<LibraryError, Unit>
 
     suspend fun getBookmarks(bookId: String): Either<LibraryError, List<Bookmark>>
     suspend fun addBookmark(bookmark: Bookmark): Either<LibraryError, Unit>

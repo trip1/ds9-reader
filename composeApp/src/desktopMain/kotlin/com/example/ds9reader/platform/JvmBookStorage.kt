@@ -36,6 +36,19 @@ class JvmBookStorage(
         )
     }
 
+
+    override suspend fun deleteEpub(path: String): Either<LibraryError, Unit> {
+        return runCatching {
+            val file = File(path)
+            if (file.exists() && !file.delete()) {
+                error("Unable to delete file: $path")
+            }
+        }.fold(
+            onSuccess = { Unit.right() },
+            onFailure = { LibraryError.Storage(it.message ?: "Unable to delete EPUB").left() },
+        )
+    }
+
     override suspend fun listLocalEpubs(directoryHint: String?): Either<LibraryError, List<String>> {
         return runCatching {
             val dir = directoryHint?.let { File(it) } ?: rootDir

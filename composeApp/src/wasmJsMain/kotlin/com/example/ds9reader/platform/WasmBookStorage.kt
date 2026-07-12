@@ -35,6 +35,16 @@ class WasmBookStorage : BookStorage {
         )
     }
 
+
+    override suspend fun deleteEpub(path: String): Either<LibraryError, Unit> {
+        return runCatching {
+            localStorage.removeItem(path)
+        }.fold(
+            onSuccess = { Unit.right() },
+            onFailure = { LibraryError.Storage(it.message ?: "Unable to delete EPUB").left() },
+        )
+    }
+
     override suspend fun listLocalEpubs(directoryHint: String?): Either<LibraryError, List<String>> =
         emptyList<String>().right()
 }

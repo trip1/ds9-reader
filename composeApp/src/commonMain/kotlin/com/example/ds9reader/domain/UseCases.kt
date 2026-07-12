@@ -135,6 +135,18 @@ class SyncWithCalibreUseCase(
         return Unit.right()
     }
 
+    suspend fun deleteDownload(bookId: String): Either<LibraryError, Unit> {
+        val book = when (val result = repository.getBook(bookId)) {
+            is Either.Left -> return result
+            is Either.Right -> result.value
+        }
+        if (book.filePath.isNotBlank()) {
+            // Best-effort file delete; still clear DB state if file is already gone.
+            storage.deleteEpub(book.filePath)
+        }
+        return repository.clearDownloaded(bookId)
+    }
+
     suspend fun pushDirtyProgress(): Either<LibraryError, Int> {
         val dirty = when (val result = repository.getDirtyBookIds()) {
             is Either.Left -> return result

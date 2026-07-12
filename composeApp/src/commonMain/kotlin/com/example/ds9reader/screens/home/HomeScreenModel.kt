@@ -37,6 +37,7 @@ data class HomeUiState(
     val error: String? = null,
     val isSyncing: Boolean = false,
     val downloadingIds: Set<String> = emptySet(),
+    val deletingIds: Set<String> = emptySet(),
 ) {
     val selectedLibrary: VirtualLibrary
         get() = VirtualLibraries.byId(selectedLibraryId)
@@ -213,6 +214,32 @@ class HomeScreenModel(
                         it.copy(
                             downloadingIds = it.downloadingIds - bookId,
                             statusMessage = "Downloaded \"${result.value.title}\"",
+                        )
+                    }
+                    refresh()
+                }
+            }
+        }
+    }
+
+
+    fun deleteDownload(bookId: String) {
+        screenModelScope.launch {
+            _uiState.update { it.copy(deletingIds = it.deletingIds + bookId, error = null) }
+            when (val result = syncUseCase.deleteDownload(bookId)) {
+                is Either.Left -> {
+                    _uiState.update {
+                        it.copy(
+                            deletingIds = it.deletingIds - bookId,
+                            error = result.value.toMessage(),
+                        )
+                    }
+                }
+                is Either.Right -> {
+                    _uiState.update {
+                        it.copy(
+                            deletingIds = it.deletingIds - bookId,
+                            statusMessage = "Removed download",
                         )
                     }
                     refresh()
