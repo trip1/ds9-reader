@@ -26,7 +26,7 @@ fun App() {
     var themeMode by remember { mutableStateOf(ThemeMode.System) }
 
     LaunchedEffect(repository) {
-        themeMode = repository.getThemeMode()
+        themeMode = runCatching { repository.getThemeMode() }.getOrDefault(ThemeMode.System)
     }
 
     Ds9Theme(themeMode = themeMode) {
@@ -41,7 +41,9 @@ fun App() {
                             ThemeMode.Dark -> ThemeMode.System
                         }
                         themeMode = next
-                        scope.launch { repository.setThemeMode(next) }
+                        scope.launch {
+                            runCatching { repository.setThemeMode(next) }
+                        }
                     },
                 ),
             ) { navigator ->

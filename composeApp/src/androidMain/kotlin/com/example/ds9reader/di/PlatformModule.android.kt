@@ -13,13 +13,14 @@ import org.koin.dsl.module
 
 actual fun platformModule(): Module = module {
     single<SqlDriver> {
+        // Fresh DB filename so older installs with incomplete schema don't crash on launch.
+        // (AppSetting was added without a SQLDelight migration version bump.)
         AndroidSqliteDriver(
             schema = LibraryDatabase.Schema,
             context = androidContext(),
-            name = "ds9_reader.db",
+            name = "ds9_reader_v2.db",
         )
     }
-    single<android.content.Context> { androidContext() }
     single<BookStorage> { AndroidBookStorage(androidContext()) }
     single<FilePicker> { AndroidFilePicker(androidContext()) }
 }
