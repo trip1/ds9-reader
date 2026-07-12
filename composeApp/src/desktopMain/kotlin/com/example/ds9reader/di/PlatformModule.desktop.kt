@@ -1,25 +1,25 @@
 package com.example.ds9reader.di
 
-import com.example.ds9reader.createSqlDriver
-import com.example.ds9reader.data.BookImporter
-import com.example.ds9reader.data.DesktopBookImporter
-import com.example.ds9reader.domain.LibraryPathProvider
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import com.example.ds9reader.database.LibraryDatabase
+import com.example.ds9reader.domain.BookStorage
+import com.example.ds9reader.domain.FilePicker
+import com.example.ds9reader.platform.DesktopFilePicker
+import com.example.ds9reader.platform.JvmBookStorage
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import java.io.File
 
 actual fun platformModule(): Module = module {
-    single { createSqlDriver() }
-    
-    single<LibraryPathProvider> {
-        object : LibraryPathProvider {
-            override fun getLibraryPath(): String {
-                val dir = File(System.getProperty("user.home"), ".ds9-reader/library")
-                if (!dir.exists()) dir.mkdirs()
-                return dir.absolutePath
-            }
-        }
+    single {
+        val dbFile = File(System.getProperty("user.home"), ".ds9-reader/library.db")
+        dbFile.parentFile?.mkdirs()
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+        LibraryDatabase.Schema.create(driver)
+        driver
     }
-    
-    single<BookImporter> { DesktopBookImporter(get<LibraryPathProvider>().getLibraryPath()) }
+    single<BookStorage> {
+        JvmBookStorage(File(System.getProperty("user.home"), ".ds9-reader/books"))
+    }
+    single<FilePicker> { DesktopFilePicker() }
 }

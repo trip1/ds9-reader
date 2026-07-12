@@ -3,109 +3,139 @@ package com.example.ds9reader.screens.home
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.example.ds9reader.domain.Book
-import com.example.ds9reader.domain.ImportEpubsUseCase
+import com.example.ds9reader.domain.CalibreConfig
+import com.example.ds9reader.domain.LibraryError
 import com.example.ds9reader.domain.LibraryRepository
+import com.example.ds9reader.domain.SyncWithCalibreUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import arrow.core.Either
 
-/**
- * UI state for the home screen.
- */
 data class HomeUiState(
+    val isLoading: Boolean = true,
     val books: List<Book> = emptyList(),
-    val isLoading: Boolean = false,
+    val continueReading: List<Book> = emptyList(),
+    val config: CalibreConfig = CalibreConfig(),
+    val statusMessage: String? = null,
     val error: String? = null,
-    val importProgress: ImportProgress? = null,
+    val isSyncing: Boolean = false,
+    val downloadingIds: Set<String> = emptySet(),
 )
 
-/**
- * Tracks the progress of an import operation.
- */
-data class ImportProgress(
-    val isRunning: Boolean = false,
-    val message: String? = null,
-)
-
-/**
- * ScreenModel for the home/library screen.
- * Manages loading, observing the book library, and importing EPUBs.
- */
 class HomeScreenModel(
     private val repository: LibraryRepository,
-    private val importUseCase: ImportEpubsUseCase,
+    private val syncUseCase: SyncWithCalibreUseCase,
 ) : ScreenModel {
-
-    private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
+    private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
-        loadBooks()
+        refresh()
     }
 
-    fun loadBooks() {
+    fun refresh() {
         screenModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repository.getAllBooks().fold(
-                ifRight = { books ->
-                    _uiState.update {
-                        it.copy(books = books, isLoading = false)
+            when (val booksResult = repository.getAllBooks()) {
+                is Either.Left -> {
+                    _uiState.update { it.copy(isLoading = false, error = booksResult.value.toMessage()) }
+                    return@launch
+                }
+                is Either.Right -> {
+                    val cont = when (val c = repository.getContinueReading()) {
+                        is Either.Right -> c.value
+                        is Either.Left -> emptyList()
                     }
-                },
-                ifLeft = { error ->
+                    val config = when (val c = repository.getCalibreConfig()) {
+                        is Either.Right -> c.value
+                        is Either.Left -> CalibreConfig()
+                    }
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            error = "Failed to load library: ${error}"
+                            books = booksResult.value,
+                            continueReading = cont,
+                            config = config,
                         )
                     }
                 }
-            )
+            }
         }
     }
 
-    fun importFiles(filePaths: List<String>) {
-        if (filePaths.isEmpty()) return
-
+    fun saveConfig(config: CalibreConfig) {
         screenModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    importProgress = ImportProgress(isRunning = true, message = "Importing ${filePaths.size} file(s)..."),
-                    error = null
-                )
-            }
-
-            val summary = importUseCase.importFiles(filePaths)
-
-            _uiState.update {
-                it.copy(
-                    importProgress = if (summary.hasErrors) {
-                        ImportProgress(
-                            isRunning = false,
-                            message = "Imported ${summary.succeeded}, failed ${summary.failed}"
-                        )
-                    } else null
-                )
-            }
-
-            if (summary.hasErrors) {
-                _uiState.update { state ->
-                    state.copy(error = summary.errors.joinToString("\n"))
+            when (val result = repository.saveCalibreConfig(config)) {
+                is Either.Left -> _uiState.update { it.copy(error = result.value.toMessage()) }
+                is Either.Right -> _uiState.update {
+                    it.copy(config = config, statusMessage = "Calibre settings saved")
                 }
             }
-
-            // Reload books after import
-            loadBooks()
         }
     }
 
-    fun dismissImportProgress() {
-        _uiState.update { it.copy(importProgress = null) }
+    fun syncLibrary() {
+        screenModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true, error = null, statusMessage = "Syncing with Calibre…") }
+            when (val result = syncUseCase.syncLibrary()) {
+                is Either.Left -> {
+                    _uiState.update {
+                        it.copy(isSyncing = false, error = result.value.toMessage(), statusMessage = null)
+                    }
+                }
+                is Either.Right -> {
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            statusMessage = "Synced ${result.value} books from Calibre",
+                        )
+                    }
+                    refresh()
+                    syncUseCase.pushDirtyProgress()
+                }
+            }
+        }
     }
 
-    fun dismissError() {
-        _uiState.update { it.copy(error = null) }
+    fun download(bookId: String) {
+        screenModelScope.launch {
+            _uiState.update { it.copy(downloadingIds = it.downloadingIds + bookId, error = null) }
+            when (val result = syncUseCase.downloadBook(bookId)) {
+                is Either.Left -> {
+                    _uiState.update {
+                        it.copy(
+                            downloadingIds = it.downloadingIds - bookId,
+                            error = result.value.toMessage(),
+                        )
+                    }
+                }
+                is Either.Right -> {
+                    _uiState.update {
+                        it.copy(
+                            downloadingIds = it.downloadingIds - bookId,
+                            statusMessage = "Downloaded “${result.value.title}”",
+                        )
+                    }
+                    refresh()
+                }
+            }
+        }
+    }
+
+    fun dismissMessage() {
+        _uiState.update { it.copy(statusMessage = null, error = null) }
+    }
+
+    private fun LibraryError.toMessage(): String = when (this) {
+        is LibraryError.Auth -> message
+        is LibraryError.Config -> message
+        is LibraryError.Network -> message
+        is LibraryError.NotFound -> "Book not found: $bookId"
+        is LibraryError.Parse -> message
+        is LibraryError.Storage -> message
+        LibraryError.FileNotFound -> "Book file not found. Download it from Calibre first."
     }
 }

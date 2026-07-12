@@ -1,24 +1,31 @@
--- Library database for tracking books, reading progress, and metadata
+-- Library database for tracking books, reading progress, Calibre sync, and settings
 
 CREATE TABLE Book (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
     author TEXT NOT NULL DEFAULT '',
     cover_url TEXT,
-    file_path TEXT NOT NULL,
+    file_path TEXT NOT NULL DEFAULT '',
     file_size INTEGER NOT NULL DEFAULT 0,
     added_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_opened_at TEXT,
     progress REAL NOT NULL DEFAULT 0.0,
-    current_chapter INTEGER NOT NULL DEFAULT 0,
-    total_chapters INTEGER NOT NULL DEFAULT 0
+    current_spine_index INTEGER NOT NULL DEFAULT 0,
+    current_anchor TEXT NOT NULL DEFAULT '',
+    total_chapters INTEGER NOT NULL DEFAULT 0,
+    calibre_id INTEGER,
+    calibre_uuid TEXT,
+    is_downloaded INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    series TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE Bookmark (
     id TEXT NOT NULL PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES Book(id) ON DELETE CASCADE,
-    chapter_index INTEGER NOT NULL,
-    cfi TEXT NOT NULL,
+    spine_index INTEGER NOT NULL DEFAULT 0,
+    anchor TEXT NOT NULL DEFAULT '',
     label TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -28,29 +35,72 @@ CREATE TABLE ReadingSession (
     book_id TEXT NOT NULL REFERENCES Book(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    start_cfi TEXT NOT NULL,
-    end_cfi TEXT,
+    start_anchor TEXT NOT NULL DEFAULT '',
+    end_anchor TEXT,
     duration_seconds INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE CalibreSettings (
+    id INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
+    base_url TEXT NOT NULL DEFAULT '',
+    username TEXT NOT NULL DEFAULT '',
+    password TEXT NOT NULL DEFAULT '',
+    library_id TEXT NOT NULL DEFAULT '',
+    device_name TEXT NOT NULL DEFAULT 'DS9-Reader',
+    last_sync_at TEXT
+);
+
+CREATE TABLE SyncState (
+    book_id TEXT NOT NULL PRIMARY KEY REFERENCES Book(id) ON DELETE CASCADE,
+    remote_progress REAL NOT NULL DEFAULT 0.0,
+    remote_spine_index INTEGER NOT NULL DEFAULT 0,
+    remote_anchor TEXT NOT NULL DEFAULT '',
+    last_synced_at TEXT,
+    dirty INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_bookmark_book ON Bookmark(book_id);
 CREATE INDEX idx_session_book ON ReadingSession(book_id);
 CREATE INDEX idx_book_added ON Book(added_at);
 CREATE INDEX idx_book_last_opened ON Book(last_opened_at);
+CREATE INDEX idx_book_calibre ON Book(calibre_id);
 
 selectAllBooks:
 SELECT * FROM Book ORDER BY last_opened_at DESC, added_at DESC;
 
+selectDownloadedBooks:
+SELECT * FROM Book WHERE is_downloaded = 1 ORDER BY last_opened_at DESC, title ASC;
+
+selectContinueReading:
+SELECT * FROM Book WHERE progress > 0.0 AND progress < 0.99 ORDER BY last_opened_at DESC LIMIT 20;
+
 insertBook:
-INSERT OR REPLACE INTO Book (id, title, author, cover_url, file_path, file_size, added_at, progress, current_chapter, total_chapters)
-VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?);
+INSERT OR REPLACE INTO Book (
+    id, title, author, cover_url, file_path, file_size, added_at,
+    progress, current_spine_index, current_anchor, total_chapters,
+    calibre_id, calibre_uuid, is_downloaded, description, series, tags
+) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+upsertCalibreBook:
+INSERT OR REPLACE INTO Book (
+    id, title, author, cover_url, file_path, file_size, added_at,
+    progress, current_spine_index, current_anchor, total_chapters,
+    calibre_id, calibre_uuid, is_downloaded, description, series, tags
+) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 0.0, 0, '', 0, ?, ?, 0, ?, ?, ?);
 
 updateBookProgress:
-UPDATE Book SET progress = ?, current_chapter = ?, last_opened_at = datetime('now')
+UPDATE Book
+SET progress = ?, current_spine_index = ?, current_anchor = ?, last_opened_at = datetime('now')
 WHERE id = ?;
+
+markDownloaded:
+UPDATE Book SET is_downloaded = 1, file_path = ?, file_size = ? WHERE id = ?;
 
 getBookById:
 SELECT * FROM Book WHERE id = ?;
+
+getBookByCalibreId:
+SELECT * FROM Book WHERE calibre_id = ?;
 
 deleteBook:
 DELETE FROM Book WHERE id = ?;
@@ -59,19 +109,46 @@ getBookmarksForBook:
 SELECT * FROM Bookmark WHERE book_id = ? ORDER BY created_at DESC;
 
 insertBookmark:
-INSERT INTO Bookmark (id, book_id, chapter_index, cfi, label, created_at)
+INSERT INTO Bookmark (id, book_id, spine_index, anchor, label, created_at)
 VALUES (?, ?, ?, ?, ?, datetime('now'));
 
 deleteBookmark:
 DELETE FROM Bookmark WHERE id = ?;
 
 insertSession:
-INSERT INTO ReadingSession (id, book_id, started_at, start_cfi)
+INSERT INTO ReadingSession (id, book_id, started_at, start_anchor)
 VALUES (?, ?, datetime('now'), ?);
 
 endSession:
-UPDATE ReadingSession SET ended_at = datetime('now'), end_cfi = ?, duration_seconds = ?
+UPDATE ReadingSession
+SET ended_at = datetime('now'), end_anchor = ?, duration_seconds = ?
 WHERE id = ?;
 
 getRecentSessions:
 SELECT * FROM ReadingSession ORDER BY started_at DESC LIMIT 10;
+
+getSettings:
+SELECT * FROM CalibreSettings WHERE id = 1;
+
+upsertSettings:
+INSERT OR REPLACE INTO CalibreSettings (id, base_url, username, password, library_id, device_name, last_sync_at)
+VALUES (1, ?, ?, ?, ?, ?, ?);
+
+markSynced:
+UPDATE CalibreSettings SET last_sync_at = datetime('now') WHERE id = 1;
+
+upsertSyncState:
+INSERT OR REPLACE INTO SyncState (book_id, remote_progress, remote_spine_index, remote_anchor, last_synced_at, dirty)
+VALUES (?, ?, ?, ?, datetime('now'), ?);
+
+getDirtySyncStates:
+SELECT * FROM SyncState WHERE dirty = 1;
+
+getSyncState:
+SELECT * FROM SyncState WHERE book_id = ?;
+
+markSyncClean:
+UPDATE SyncState SET dirty = 0, last_synced_at = datetime('now') WHERE book_id = ?;
+
+markSyncDirty:
+UPDATE SyncState SET dirty = 1 WHERE book_id = ?;

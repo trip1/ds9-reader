@@ -1,35 +1,26 @@
 package com.example.ds9reader.data
 
-import app.cash.sqldelight.coroutines.asFlow
-import app.cash.sqldelight.coroutines.mapToList
 import arrow.core.Either
 import arrow.core.left
 import arrow.core.right
+import com.example.ds9reader.database.LibraryDatabase
 import com.example.ds9reader.domain.Book
 import com.example.ds9reader.domain.Bookmark
+import com.example.ds9reader.domain.CalibreConfig
 import com.example.ds9reader.domain.LibraryError
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.ReadingSession
-import com.example.ds9reader.database.LibraryDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map as flowMap
-
 import kotlinx.coroutines.withContext
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-/**
- * SQLDelight-backed implementation of the library repository.
- */
 class SqlLibraryRepository(
     database: LibraryDatabase,
 ) : LibraryRepository {
-
     private val db = database.libraryDatabaseQueries
 
-    @OptIn(ExperimentalUuidApi::class)
     override suspend fun addBook(book: Book): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
         runCatching {
             db.insertBook(
@@ -40,92 +31,87 @@ class SqlLibraryRepository(
                 file_path = book.filePath,
                 file_size = book.fileSize,
                 progress = book.progress.toDouble(),
-                current_chapter = book.currentChapter.toLong(),
-                total_chapters = book.totalChapters.toLong()
+                current_spine_index = book.currentSpineIndex.toLong(),
+                current_anchor = book.currentAnchor,
+                total_chapters = book.totalChapters.toLong(),
+                calibre_id = book.calibreId,
+                calibre_uuid = book.calibreUuid,
+                is_downloaded = if (book.isDownloaded) 1 else 0,
+                description = book.description,
+                series = book.series,
+                tags = book.tags,
             )
-        }.fold(
-            onSuccess = { Unit.right() },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-        )
+        }.toUnitEither()
+    }
+
+    override suspend fun upsertCalibreBook(book: Book): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            db.upsertCalibreBook(
+                id = book.id,
+                title = book.title,
+                author = book.author,
+                cover_url = book.coverUrl,
+                file_path = book.filePath,
+                file_size = book.fileSize,
+                calibre_id = book.calibreId,
+                calibre_uuid = book.calibreUuid,
+                description = book.description,
+                series = book.series,
+                tags = book.tags,
+            )
+        }.toUnitEither()
     }
 
     override suspend fun getAllBooks(): Either<LibraryError, List<Book>> = withContext(Dispatchers.IO) {
-        runCatching {
-            db.selectAllBooks().executeAsList().map { row ->
-                Book(
-                    id = row.id,
-                    title = row.title,
-                    author = row.author,
-                    coverUrl = row.cover_url,
-                    filePath = row.file_path,
-                    fileSize = row.file_size,
-                    addedAt = row.added_at,
-                    lastOpenedAt = row.last_opened_at,
-                    progress = row.progress.toFloat(),
-                    currentChapter = row.current_chapter.toInt(),
-                    totalChapters = row.total_chapters.toInt(),
-                )
-            }
-        }.fold(
-            onSuccess = { it.right() },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-        )
+        runCatching { db.selectAllBooks().executeAsList().map { it.toDomain() } }.toListEither()
+    }
+
+    override suspend fun getDownloadedBooks(): Either<LibraryError, List<Book>> = withContext(Dispatchers.IO) {
+        runCatching { db.selectDownloadedBooks().executeAsList().map { it.toDomain() } }.toListEither()
+    }
+
+    override suspend fun getContinueReading(): Either<LibraryError, List<Book>> = withContext(Dispatchers.IO) {
+        runCatching { db.selectContinueReading().executeAsList().map { it.toDomain() } }.toListEither()
     }
 
     override suspend fun getBook(id: String): Either<LibraryError, Book> = withContext(Dispatchers.IO) {
-        runCatching {
-            db.getBookById(id).executeAsOneOrNull()
-        }.fold(
+        runCatching { db.getBookById(id).executeAsOneOrNull() }.fold(
             onSuccess = { row ->
-                if (row != null) {
-                    Book(
-                        id = row.id,
-                        title = row.title,
-                        author = row.author,
-                        coverUrl = row.cover_url,
-                        filePath = row.file_path,
-                        fileSize = row.file_size,
-                        addedAt = row.added_at,
-                        lastOpenedAt = row.last_opened_at,
-                        progress = row.progress.toFloat(),
-                        currentChapter = row.current_chapter.toInt(),
-                        totalChapters = row.total_chapters.toInt(),
-                    ).right()
-                } else {
-                    LibraryError.NotFound(id).left()
-                }
+                row?.toDomain()?.right() ?: LibraryError.NotFound(id).left()
             },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
+            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
         )
     }
 
     override suspend fun removeBook(id: String): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            db.deleteBook(id)
-        }.fold(
-            onSuccess = { Unit.right() },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-        )
+        runCatching { db.deleteBook(id) }.toUnitEither()
     }
 
     override suspend fun updateProgress(
         bookId: String,
         progress: Float,
-        chapter: Int
+        spineIndex: Int,
+        anchor: String,
     ): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
         runCatching {
             db.updateBookProgress(
                 progress = progress.toDouble(),
-                current_chapter = chapter.toLong(),
-                id = bookId
+                current_spine_index = spineIndex.toLong(),
+                current_anchor = anchor,
+                id = bookId,
             )
-        }.fold(
-            onSuccess = { Unit.right() },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-        )
+            db.markSyncDirty(bookId)
+        }.toUnitEither()
     }
 
-    @OptIn(ExperimentalUuidApi::class)
+    override suspend fun markDownloaded(
+        bookId: String,
+        filePath: String,
+        fileSize: Long,
+    ): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
+        runCatching { db.markDownloaded(file_path = filePath, file_size = fileSize, id = bookId) }.toUnitEither()
+    }
+
     override suspend fun getBookmarks(bookId: String): Either<LibraryError, List<Bookmark>> =
         withContext(Dispatchers.IO) {
             runCatching {
@@ -133,16 +119,13 @@ class SqlLibraryRepository(
                     Bookmark(
                         id = row.id,
                         bookId = row.book_id,
-                        chapterIndex = row.chapter_index.toInt(),
-                        cfi = row.cfi,
+                        spineIndex = row.spine_index.toInt(),
+                        anchor = row.anchor,
                         label = row.label,
                         createdAt = row.created_at,
                     )
                 }
-            }.fold(
-                onSuccess = { it.right() },
-                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-            )
+            }.toListEither()
         }
 
     @OptIn(ExperimentalUuidApi::class)
@@ -150,59 +133,44 @@ class SqlLibraryRepository(
         withContext(Dispatchers.IO) {
             runCatching {
                 db.insertBookmark(
-                    id = bookmark.id,
+                    id = bookmark.id.ifBlank { Uuid.random().toString() },
                     book_id = bookmark.bookId,
-                    chapter_index = bookmark.chapterIndex.toLong(),
-                    cfi = bookmark.cfi,
-                    label = bookmark.label
+                    spine_index = bookmark.spineIndex.toLong(),
+                    anchor = bookmark.anchor,
+                    label = bookmark.label,
                 )
-            }.fold(
-                onSuccess = { Unit.right() },
-                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-            )
+            }.toUnitEither()
         }
 
     override suspend fun removeBookmark(id: String): Either<LibraryError, Unit> =
         withContext(Dispatchers.IO) {
-            runCatching {
-                db.deleteBookmark(id)
-            }.fold(
-                onSuccess = { Unit.right() },
-                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-            )
+            runCatching { db.deleteBookmark(id) }.toUnitEither()
         }
 
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun startSession(bookId: String, cfi: String): Either<LibraryError, String> =
+    override suspend fun startSession(bookId: String, anchor: String): Either<LibraryError, String> =
         withContext(Dispatchers.IO) {
             val sessionId = Uuid.random().toString()
             runCatching {
-                db.insertSession(
-                    id = sessionId,
-                    book_id = bookId,
-                    start_cfi = cfi
-                )
+                db.insertSession(id = sessionId, book_id = bookId, start_anchor = anchor)
             }.fold(
                 onSuccess = { sessionId.right() },
-                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
+                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
             )
         }
 
     override suspend fun endSession(
         sessionId: String,
-        cfi: String,
-        duration: Int
+        anchor: String,
+        duration: Int,
     ): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
         runCatching {
             db.endSession(
-                end_cfi = cfi,
+                end_anchor = anchor,
                 duration_seconds = duration.toLong(),
-                id = sessionId
+                id = sessionId,
             )
-        }.fold(
-            onSuccess = { Unit.right() },
-            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-        )
+        }.toUnitEither()
     }
 
     override suspend fun getRecentSessions(): Either<LibraryError, List<ReadingSession>> =
@@ -214,40 +182,108 @@ class SqlLibraryRepository(
                         bookId = row.book_id,
                         startedAt = row.started_at,
                         endedAt = row.ended_at,
-                        startCfi = row.start_cfi,
-                        endCfi = row.end_cfi,
+                        startAnchor = row.start_anchor,
+                        endAnchor = row.end_anchor,
                         durationSeconds = row.duration_seconds.toInt(),
                     )
                 }
-            }.fold(
-                onSuccess = { it.right() },
-                onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() }
-            )
+            }.toListEither()
         }
 
-    /**
-     * Observable flow of all books — emits on every change.
-     */
-    fun observeBooks(): Flow<List<Book>> {
-        return db.selectAllBooks()
-            .asFlow()
-            .mapToList(Dispatchers.IO)
-            .flowMap { rows ->
-                rows.map { row ->
-                    Book(
-                        id = row.id,
-                        title = row.title,
-                        author = row.author,
-                        coverUrl = row.cover_url,
-                        filePath = row.file_path,
-                        fileSize = row.file_size,
-                        addedAt = row.added_at,
-                        lastOpenedAt = row.last_opened_at,
-                        progress = row.progress.toFloat(),
-                        currentChapter = row.current_chapter.toInt(),
-                        totalChapters = row.total_chapters.toInt(),
-                    )
-                }
+    override suspend fun getCalibreConfig(): Either<LibraryError, CalibreConfig> = withContext(Dispatchers.IO) {
+        runCatching {
+            val row = db.getSettings().executeAsOneOrNull()
+            if (row == null) {
+                CalibreConfig()
+            } else {
+                CalibreConfig(
+                    baseUrl = row.base_url,
+                    username = row.username,
+                    password = row.password,
+                    libraryId = row.library_id,
+                    deviceName = row.device_name,
+                    lastSyncAt = row.last_sync_at,
+                )
             }
+        }.fold(
+            onSuccess = { it.right() },
+            onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
+        )
     }
+
+    override suspend fun saveCalibreConfig(config: CalibreConfig): Either<LibraryError, Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                db.upsertSettings(
+                    base_url = config.baseUrl.trim(),
+                    username = config.username,
+                    password = config.password,
+                    library_id = config.libraryId,
+                    device_name = config.deviceName.ifBlank { "DS9-Reader" },
+                    last_sync_at = config.lastSyncAt,
+                )
+            }.toUnitEither()
+        }
+
+    override suspend fun markLibrarySynced(): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
+        runCatching { db.markSynced() }.toUnitEither()
+    }
+
+    override suspend fun markProgressDirty(bookId: String): Either<LibraryError, Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching { db.markSyncDirty(bookId) }.toUnitEither()
+        }
+
+    override suspend fun getDirtyBookIds(): Either<LibraryError, List<String>> = withContext(Dispatchers.IO) {
+        runCatching { db.getDirtySyncStates().executeAsList().map { it.book_id } }.toListEither()
+    }
+
+    override suspend fun markProgressClean(
+        bookId: String,
+        progress: Float,
+        spineIndex: Int,
+        anchor: String,
+    ): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            db.upsertSyncState(
+                book_id = bookId,
+                remote_progress = progress.toDouble(),
+                remote_spine_index = spineIndex.toLong(),
+                remote_anchor = anchor,
+                dirty = 0,
+            )
+            db.markSyncClean(bookId)
+        }.toUnitEither()
+    }
+
+    private fun com.example.ds9reader.database.Book.toDomain(): Book = Book(
+        id = id,
+        title = title,
+        author = author,
+        coverUrl = cover_url,
+        filePath = file_path,
+        fileSize = file_size,
+        addedAt = added_at,
+        lastOpenedAt = last_opened_at,
+        progress = progress.toFloat(),
+        currentSpineIndex = current_spine_index.toInt(),
+        currentAnchor = current_anchor,
+        totalChapters = total_chapters.toInt(),
+        calibreId = calibre_id,
+        calibreUuid = calibre_uuid,
+        isDownloaded = is_downloaded != 0L,
+        description = description,
+        series = series,
+        tags = tags,
+    )
+
+    private fun <T> Result<T>.toListEither(): Either<LibraryError, T> = fold(
+        onSuccess = { it.right() },
+        onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
+    )
+
+    private fun Result<*>.toUnitEither(): Either<LibraryError, Unit> = fold(
+        onSuccess = { Unit.right() },
+        onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
+    )
 }

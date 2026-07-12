@@ -1,10 +1,12 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.sqldelight)
 }
 
@@ -18,7 +20,7 @@ kotlin {
     listOf(
         iosX64(),
         iosArm64(),
-        iosSimulatorArm64()
+        iosSimulatorArm64(),
     ).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
@@ -27,6 +29,16 @@ kotlin {
     }
 
     jvm("desktop")
+
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmJs {
+        browser {
+            commonWebpackConfig {
+                outputFileName = "ds9Reader.js"
+            }
+        }
+        binaries.executable()
+    }
 
     sourceSets {
         val commonMain by getting {
@@ -37,31 +49,33 @@ kotlin {
                 implementation(compose.ui)
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
+                implementation(compose.materialIconsExtended)
 
-                // Arrow
                 implementation(libs.arrow.core)
                 implementation(libs.arrow.fx.coroutines)
 
-                // SQLDelight runtime
                 implementation(libs.sqldelight.runtime)
                 implementation(libs.sqldelight.coroutines)
 
-                // Voyager navigation
                 implementation(libs.voyager.navigator)
                 implementation(libs.voyager.screenmodel)
                 implementation(libs.voyager.transitions)
 
-                // Readium core (shared types — multiplatform)
-                implementation(libs.readium.shared)
-
-                // Koin DI
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
                 implementation(libs.koin.compose.viewmodel)
 
-                // Kotlinx
                 implementation(libs.kotlinx.coroutines)
                 implementation(libs.kotlinx.datetime)
+                implementation(libs.kotlinx.serialization.json)
+
+                implementation(libs.ktor.client.core)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.client.auth)
+                implementation(libs.ktor.client.logging)
+                implementation(libs.ktor.serialization.json)
+
+                implementation(libs.okio)
             }
         }
 
@@ -71,8 +85,7 @@ kotlin {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.fragment.ktx)
                 implementation(libs.sqldelight.android.driver)
-                implementation(libs.readium.streamer)
-                implementation(libs.readium.navigator)
+                implementation(libs.ktor.client.okhttp)
                 implementation(libs.koin.android)
                 implementation(libs.koin.androidx.compose)
             }
@@ -82,20 +95,30 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.sqldelight.sqlite.driver)
+                implementation(libs.ktor.client.cio)
             }
         }
 
-        // iOS nativeMain — shared across all iOS targets
         val nativeMain by creating {
             dependsOn(commonMain)
+            dependencies {
+                implementation(libs.sqldelight.native.driver)
+                implementation(libs.ktor.client.darwin)
+            }
         }
 
         val iosX64Main by getting { dependsOn(nativeMain) }
         val iosArm64Main by getting { dependsOn(nativeMain) }
         val iosSimulatorArm64Main by getting { dependsOn(nativeMain) }
 
-        nativeMain.dependencies {
-            implementation(libs.sqldelight.native.driver)
+        val wasmJsMain by getting {
+            dependencies {
+                implementation(libs.ktor.client.js)
+                implementation(libs.sqldelight.web.driver)
+                implementation(npm("@cashapp/sqldelight-sqljs-worker", "2.0.2"))
+                implementation(npm("sql.js", "1.12.0"))
+                implementation(devNpm("copy-webpack-plugin", "12.0.2"))
+            }
         }
 
         val commonTest by getting {
@@ -114,8 +137,8 @@ android {
         applicationId = "com.example.ds9reader"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     packaging {
         resources {
@@ -125,6 +148,8 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            // Sideload-friendly: sign release with debug keystore when no release keystore is configured.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -142,10 +167,9 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.example.ds9reader.MainKt"
-
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.example.ds9reader"
+            packageName = "ds9-reader"
             packageVersion = "1.0.0"
         }
     }
