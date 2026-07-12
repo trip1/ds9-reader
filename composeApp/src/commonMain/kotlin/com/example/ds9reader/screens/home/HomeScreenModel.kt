@@ -32,6 +32,7 @@ data class HomeUiState(
     val sort: LibrarySort = LibrarySort.Title,
     val selectedLibraryId: String = "all",
     val selectedTag: String? = null,
+    val searchQuery: String = "",
     val availableTags: List<String> = emptyList(),
     val statusMessage: String? = null,
     val error: String? = null,
@@ -74,6 +75,15 @@ data class HomeUiState(
             val tag = selectedTag
             if (!tag.isNullOrBlank()) {
                 list = list.filter { it.hasTag(tag) }
+            }
+            val q = searchQuery.trim()
+            if (q.isNotEmpty()) {
+                list = list.filter { book ->
+                    book.title.contains(q, ignoreCase = true) ||
+                        book.author.contains(q, ignoreCase = true) ||
+                        book.series.contains(q, ignoreCase = true) ||
+                        book.tags.contains(q, ignoreCase = true)
+                }
             }
             val sorted = when (sort) {
                 LibrarySort.Title -> list.sortedWith { a, b ->
@@ -148,6 +158,10 @@ class HomeScreenModel(
         _uiState.update { it.copy(selectedLibraryId = libraryId) }
     }
 
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
     fun setTagFilter(tag: String?) {
         _uiState.update { current ->
             val next = if (tag != null && current.selectedTag.equals(tag, ignoreCase = true)) {
@@ -160,7 +174,7 @@ class HomeScreenModel(
     }
 
     fun clearFilters() {
-        _uiState.update { it.copy(selectedLibraryId = "all", selectedTag = null) }
+        _uiState.update { it.copy(selectedLibraryId = "all", selectedTag = null, searchQuery = "") }
     }
 
     fun saveConfig(config: CalibreConfig) {

@@ -140,8 +140,8 @@ android {
         applicationId = "com.example.ds9reader"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 13
-        versionName = "0.5.1"
+        versionCode = 14
+        versionName = "0.5.2"
     }
     packaging {
         resources {

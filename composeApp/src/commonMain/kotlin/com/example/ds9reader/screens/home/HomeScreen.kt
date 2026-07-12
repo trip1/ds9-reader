@@ -15,6 +15,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,27 +75,16 @@ fun LibraryTabContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(contentPadding)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         if (state.error != null) {
             StatusBanner(message = state.error ?: "", isError = true)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
         }
         if (state.statusMessage != null) {
             StatusBanner(message = state.statusMessage ?: "", isError = false)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
         }
-
-        Text(
-            text = if (state.config.isConfigured) {
-                "Calibre · ${state.config.baseUrl}"
-            } else {
-                "Connect your Calibre Content Server to download books and sync progress."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
 
         when {
             state.isLoading -> LoadingState("Loading library...")
@@ -103,45 +99,31 @@ fun LibraryTabContent(
                 },
             )
             else -> {
-                VirtualLibraryRow(
-                    libraries = state.virtualLibraries,
-                    selectedId = state.selectedLibraryId,
-                    counts = state.libraryCounts,
-                    onSelect = model::setVirtualLibrary,
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (state.availableTags.isNotEmpty()) {
-                    TagFilterRow(
-                        tags = state.availableTags,
-                        selectedTag = state.selectedTag,
-                        onSelect = model::setTagFilter,
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                SortRow(
-                    sort = state.sort,
-                    visibleCount = state.filteredBooks.size,
-                    totalCount = state.books.size,
-                    selectedLibrary = state.selectedLibrary.name,
-                    selectedTag = state.selectedTag,
+                CompactLibraryControls(
+                    state = state,
+                    onSearch = model::setSearchQuery,
+                    onSelectLibrary = model::setVirtualLibrary,
+                    onSelectTag = model::setTagFilter,
                     onSort = model::setSort,
                     onClear = model::clearFilters,
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 if (state.filteredBooks.isEmpty()) {
                     EmptyState(
                         title = "No matches",
-                        message = "No books match this virtual library / tag filter.",
+                        message = if (state.searchQuery.isNotBlank()) {
+                            "No books match \"${state.searchQuery}\"."
+                        } else {
+                            "No books match this virtual library / tag filter."
+                        },
                         action = {
                             TextButton(onClick = model::clearFilters) { Text("Clear filters") }
                         },
                     )
                 } else {
                     LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = 12.dp),
                     ) {
                         items(state.filteredBooks, key = { it.id }) { book ->
@@ -230,110 +212,113 @@ fun SimpleBookListContent(
     }
 }
 
-@Composable
-private fun VirtualLibraryRow(
-    libraries: List<VirtualLibrary>,
-    selectedId: String,
-    counts: Map<String, Int>,
-    onSelect: (String) -> Unit,
-) {
-    Column {
-        SectionLabel("Virtual libraries")
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            libraries.forEach { library ->
-                val count = counts[library.id] ?: 0
-                FilterChip(
-                    selected = selectedId == library.id,
-                    onClick = { onSelect(library.id) },
-                    label = { Text("${library.name} ($count)") },
-                )
-            }
-        }
-    }
-}
 
 @Composable
-private fun TagFilterRow(
-    tags: List<String>,
-    selectedTag: String?,
-    onSelect: (String?) -> Unit,
-) {
-    Column {
-        SectionLabel("Tags")
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            tags.forEach { tag ->
-                FilterChip(
-                    selected = selectedTag.equals(tag, ignoreCase = true),
-                    onClick = { onSelect(tag) },
-                    label = { Text(tag) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SortRow(
-    sort: LibrarySort,
-    visibleCount: Int,
-    totalCount: Int,
-    selectedLibrary: String,
-    selectedTag: String?,
+private fun CompactLibraryControls(
+    state: HomeUiState,
+    onSearch: (String) -> Unit,
+    onSelectLibrary: (String) -> Unit,
+    onSelectTag: (String?) -> Unit,
     onSort: (LibrarySort) -> Unit,
     onClear: () -> Unit,
 ) {
-    Column {
+    val hasActiveFilters =
+        state.selectedLibraryId != "all" ||
+            !state.selectedTag.isNullOrBlank() ||
+            state.searchQuery.isNotBlank()
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = state.searchQuery,
+            onValueChange = onSearch,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text("Search title, author, series, tags") },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = "Search")
+            },
+            trailingIcon = {
+                if (state.searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearch("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                    }
+                }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            ),
+        )
+
+        // Single condensed chip rail: libraries + tags + sort
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            state.virtualLibraries.forEach { library ->
+                val count = state.libraryCounts[library.id] ?: 0
+                FilterChip(
+                    selected = state.selectedLibraryId == library.id,
+                    onClick = { onSelectLibrary(library.id) },
+                    label = {
+                        Text(
+                            if (library.id == "all") "All ($count)" else "${library.name} ($count)",
+                            maxLines = 1,
+                        )
+                    },
+                )
+            }
+
+            if (state.availableTags.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(4.dp))
+                state.availableTags.take(12).forEach { tag ->
+                    FilterChip(
+                        selected = state.selectedTag.equals(tag, ignoreCase = true),
+                        onClick = { onSelectTag(tag) },
+                        label = { Text(tag, maxLines = 1) },
+                    )
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "$visibleCount of $totalCount",
-                style = MaterialTheme.typography.labelLarge,
+                text = "${state.filteredBooks.size}/${state.books.size}",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.weight(1f))
-            FilterChip(
-                selected = sort == LibrarySort.Title,
-                onClick = { onSort(LibrarySort.Title) },
-                label = { Text("Title") },
-            )
-            FilterChip(
-                selected = sort == LibrarySort.Author,
-                onClick = { onSort(LibrarySort.Author) },
-                label = { Text("Author") },
-            )
-            FilterChip(
-                selected = sort == LibrarySort.Recent,
-                onClick = { onSort(LibrarySort.Recent) },
-                label = { Text("Recent") },
-            )
-        }
-        val filterSummary = buildString {
-            append(selectedLibrary)
-            if (!selectedTag.isNullOrBlank()) append(" · tag: $selectedTag")
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = filterSummary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (selectedLibrary != "All Books" || !selectedTag.isNullOrBlank()) {
-                TextButton(onClick = onClear) { Text("Clear") }
+            CompactSortChip("Title", state.sort == LibrarySort.Title) { onSort(LibrarySort.Title) }
+            CompactSortChip("Author", state.sort == LibrarySort.Author) { onSort(LibrarySort.Author) }
+            CompactSortChip("Recent", state.sort == LibrarySort.Recent) { onSort(LibrarySort.Recent) }
+            if (hasActiveFilters) {
+                TextButton(
+                    onClick = onClear,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text("Clear")
+                }
             }
         }
     }
+}
+
+@Composable
+private fun CompactSortChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+    )
 }
 
 @Composable
