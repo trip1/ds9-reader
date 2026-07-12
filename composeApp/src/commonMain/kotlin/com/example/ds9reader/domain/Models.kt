@@ -73,17 +73,47 @@ data class CalibreRemoteBook(
     val formats: List<String>,
 )
 
+data class EpubImage(
+    val id: String,
+    val path: String,
+    val bytes: ByteArray,
+    val mimeType: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+        other as EpubImage
+        return id == other.id && path == other.path && mimeType == other.mimeType && bytes.contentEquals(other.bytes)
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + path.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        result = 31 * result + mimeType.hashCode()
+        return result
+    }
+}
+
+sealed interface EpubBlock {
+    data class Text(val text: String) : EpubBlock
+    data class Image(val imageId: String, val alt: String = "") : EpubBlock
+}
+
 data class EpubChapter(
     val index: Int,
     val href: String,
     val title: String,
+    /** Plain-text fallback for search/pagination heuristics. */
     val html: String,
+    val blocks: List<EpubBlock> = emptyList(),
 )
 
 data class EpubDocument(
     val title: String,
     val author: String,
     val chapters: List<EpubChapter>,
+    val images: Map<String, EpubImage> = emptyMap(),
 )
 
 sealed interface LibraryError {

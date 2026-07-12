@@ -3,18 +3,17 @@ package com.example.ds9reader.epub
 import arrow.core.Either
 import arrow.core.left
 import arrow.core.right
+import com.example.ds9reader.domain.EpubBlock
 import com.example.ds9reader.domain.EpubChapter
 import com.example.ds9reader.domain.EpubDocument
+import com.example.ds9reader.domain.EpubImage
 import com.example.ds9reader.domain.LibraryError
 import okio.Buffer
-import okio.BufferedSource
-import okio.ByteString.Companion.decodeHex
-import okio.use
 import kotlin.math.min
 
 /**
  * Minimal pure-Kotlin EPUB parser (EPUB 2/3 best-effort).
- * Designed for multiplatform (Android/iOS/Desktop/Wasm) without native unzip deps.
+ * Extracts chapter text blocks and referenced images for inline rendering.
  */
 object EpubParser {
     fun parse(bytes: ByteArray): Either<LibraryError, EpubDocument> = runCatching {
@@ -43,7 +42,6 @@ object EpubParser {
         ).findAll(opf).forEach { m ->
             manifest[m.groupValues[1]] = m.groupValues[2]
         }
-        // Some OPFs put href before id.
         Regex(
             """<item\b[^>]*\bhref\s*=\s*"([^"]+)"[^>]*\bid\s*=\s*"([^"]+)"[^>]*/?>""",
             setOf(RegexOption.IGNORE_CASE),
@@ -64,15 +62,16 @@ object EpubParser {
         if (navHref != null) {
             val navXml = zip.readText(resolve(opfDir, navHref))
             if (navXml != null) {
-                Regex("""<a\b[^>]*\bhref\s*=\s*"([^"]+)"[^>]*>(.*?)</a>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-                    .findAll(navXml)
-                    .forEach { m ->
-                        val href = m.groupValues[1].substringBefore('#').trim()
-                        val label = m.groupValues[2].replace(Regex("<[^>]+>"), "").unescapeXml().trim()
-                        if (href.isNotBlank() && label.isNotBlank()) {
-                            titlesByHref[href] = label
-                        }
+                Regex(
+                    """<a\b[^>]*\bhref\s*=\s*"([^"]+)"[^>]*>(.*?)</a>""",
+                    setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+                ).findAll(navXml).forEach { m ->
+                    val href = m.groupValues[1].substringBefore('#').trim()
+                    val label = m.groupValues[2].replace(Regex("<[^>]+>"), "").unescapeXml().trim()
+                    if (href.isNotBlank() && label.isNotBlank()) {
+                        titlesByHref[href] = label
                     }
+                }
                 Regex("""<content\b[^>]*\bsrc\s*=\s*"([^"]+)"[^>]*/?>""", RegexOption.IGNORE_CASE)
                     .findAll(navXml)
                     .forEachIndexed { idx, m ->
@@ -84,29 +83,152 @@ object EpubParser {
             }
         }
 
+        val images = linkedMapOf<String, EpubImage>()
         val chapters = spineIds.mapIndexedNotNull { index, id ->
             val href = manifest[id] ?: return@mapIndexedNotNull null
             val fullPath = resolve(opfDir, href)
             val html = zip.readText(fullPath) ?: return@mapIndexedNotNull null
+            val chapterDir = fullPath.substringBeforeLast('/', missingDelimiterValue = "").let {
+                if (it.isEmpty()) "" else "$it/"
+            }
             val chapterTitle = titlesByHref[href]
                 ?: titlesByHref[href.substringAfterLast('/')]
                 ?: Regex("""<title[^>]*>(.*?)</title>""", RegexOption.IGNORE_CASE)
                     .find(html)?.groupValues?.get(1)?.unescapeXml()?.ifBlank { null }
                 ?: "Chapter ${index + 1}"
+
+            val blocks = htmlToBlocks(
+                html = html,
+                chapterDir = chapterDir,
+                zip = zip,
+                images = images,
+            )
+            val plain = blocks.filterIsInstance<EpubBlock.Text>()
+                .joinToString("\n\n") { it.text }
+                .ifBlank { htmlToReadableText(html) }
+
             EpubChapter(
                 index = index,
                 href = href,
                 title = chapterTitle,
-                html = htmlToReadableText(html),
+                html = plain,
+                blocks = blocks.ifEmpty { listOf(EpubBlock.Text(plain)) },
             )
         }
 
         if (chapters.isEmpty()) error("No readable chapters found in EPUB")
-        EpubDocument(title = title, author = author, chapters = chapters)
+        EpubDocument(
+            title = title,
+            author = author,
+            chapters = chapters,
+            images = images,
+        )
     }.fold(
         onSuccess = { it.right() },
         onFailure = { LibraryError.Parse(it.message ?: "Failed to parse EPUB").left() },
     )
+
+    private fun htmlToBlocks(
+        html: String,
+        chapterDir: String,
+        zip: ZipReader,
+        images: MutableMap<String, EpubImage>,
+    ): List<EpubBlock> {
+        var cleaned = html
+            .replace(Regex("(?is)<script[^>]*>.*?</script>"), "")
+            .replace(Regex("(?is)<style[^>]*>.*?</style>"), "")
+            .replace(Regex("(?is)<!--.*?-->"), "")
+
+        // Normalize common block boundaries before image extraction.
+        cleaned = cleaned
+            .replace(Regex("(?i)<br\\s*/?>"), "\n")
+            .replace(Regex("(?i)</p>"), "\n\n")
+            .replace(Regex("(?i)</div>"), "\n")
+            .replace(Regex("(?i)</h[1-6]>"), "\n\n")
+            .replace(Regex("(?i)<li[^>]*>"), "• ")
+            .replace(Regex("(?i)</li>"), "\n")
+
+        val imgRegex = Regex(
+            """(?is)<img\b[^>]*?>""",
+        )
+        val parts = mutableListOf<EpubBlock>()
+        var last = 0
+        imgRegex.findAll(cleaned).forEach { match ->
+            val before = cleaned.substring(last, match.range.first)
+            appendTextBlocks(before, parts)
+
+            val tag = match.value
+            val src = Regex("""(?i)\bsrc\s*=\s*["']([^"']+)["']""")
+                .find(tag)?.groupValues?.get(1)
+                ?.unescapeXml()
+                ?.trim()
+                .orEmpty()
+            val alt = Regex("""(?i)\balt\s*=\s*["']([^"']*)["']""")
+                .find(tag)?.groupValues?.get(1)
+                ?.unescapeXml()
+                ?.trim()
+                .orEmpty()
+
+            if (src.isNotBlank() && !src.startsWith("data:", ignoreCase = true)) {
+                val imagePath = resolve(chapterDir, src)
+                val imageId = imagePath
+                if (imageId !in images) {
+                    val bytes = zip.readBytes(imagePath)
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        images[imageId] = EpubImage(
+                            id = imageId,
+                            path = imagePath,
+                            bytes = bytes,
+                            mimeType = guessMime(imagePath),
+                        )
+                    }
+                }
+                if (imageId in images) {
+                    parts += EpubBlock.Image(imageId = imageId, alt = alt)
+                } else if (alt.isNotBlank()) {
+                    parts += EpubBlock.Text("[Image: $alt]")
+                }
+            } else if (alt.isNotBlank()) {
+                parts += EpubBlock.Text("[Image: $alt]")
+            }
+            last = match.range.last + 1
+        }
+        appendTextBlocks(cleaned.substring(last), parts)
+
+        // Collapse consecutive empty text blocks.
+        return parts.filterNot { block ->
+            block is EpubBlock.Text && block.text.isBlank()
+        }
+    }
+
+    private fun appendTextBlocks(rawHtmlChunk: String, out: MutableList<EpubBlock>) {
+        val text = rawHtmlChunk
+            .replace(Regex("<[^>]+>"), "")
+            .unescapeXml()
+            .replace(Regex("[ \\t]+"), " ")
+            .replace(Regex(" *\\n *"), "\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+        if (text.isBlank()) return
+
+        // Split into paragraphs so pagination can keep image/text blocks coherent.
+        text.split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }.forEach { para ->
+            out += EpubBlock.Text(para)
+        }
+    }
+
+    private fun guessMime(path: String): String {
+        val lower = path.lowercase()
+        return when {
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".svg") -> "image/svg+xml"
+            lower.endsWith(".bmp") -> "image/bmp"
+            else -> "image/*"
+        }
+    }
 
     private fun resolve(baseDir: String, href: String): String {
         val cleaned = href.substringBefore('#').replace('\\', '/')
@@ -162,12 +284,16 @@ internal class ZipReader(private val bytes: ByteArray) {
     }
 
     fun readText(path: String): String? {
+        val data = readBytes(path) ?: return null
+        return data.decodeToString()
+    }
+
+    fun readBytes(path: String): ByteArray? {
         val normalized = path.trimStart('/')
         val entry = entries[normalized] ?: entries.entries.firstOrNull {
             it.key.equals(normalized, ignoreCase = true)
         }?.value ?: return null
-        val data = readEntry(entry) ?: return null
-        return data.decodeToString()
+        return readEntry(entry)
     }
 
     private fun readEntry(entry: ZipEntry): ByteArray? {
@@ -187,7 +313,6 @@ internal class ZipReader(private val bytes: ByteArray) {
     }
 
     private fun parseCentralDirectory(): Map<String, ZipEntry> {
-        // Find EOCD
         var eocd = -1
         val min = maxOf(0, bytes.size - 66_000)
         for (i in bytes.size - 22 downTo min) {
@@ -226,8 +351,6 @@ internal class ZipReader(private val bytes: ByteArray) {
     }
 
     private fun inflate(data: ByteArray, uncompressedSize: Long): ByteArray {
-        // Use expect/actual lightweight inflater through okio if available; fallback pure Kotlin not practical.
-        // For multiplatform, use platform inflater helper.
         return PlatformInflater.inflate(data, uncompressedSize.toInt().coerceAtLeast(data.size))
     }
 
