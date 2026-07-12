@@ -1,6 +1,7 @@
 package com.example.ds9reader.screens.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
@@ -58,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import arrow.core.Either
+import kotlin.math.abs
 
 data class ReaderScreen(
     val bookId: String,
@@ -265,6 +268,14 @@ private fun ReaderContent(
                     } else {
                         chapterIndex.toFloat() / (document.chapters.size - 1).toFloat()
                     }
+                    val density = LocalDensity.current
+                    val swipeThresholdPx = with(density) { 64.dp.toPx() }
+                    val scrollState = rememberScrollState()
+
+                    // Reset vertical scroll when chapter changes.
+                    LaunchedEffect(chapterIndex) {
+                        scrollState.scrollTo(0)
+                    }
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         if (controlsVisible) {
@@ -288,7 +299,26 @@ private fun ReaderContent(
                                         }
                                     }
                                 }
-                                .verticalScroll(rememberScrollState())
+                                .pointerInput(chapterIndex) {
+                                    var totalDrag = 0f
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { totalDrag = 0f },
+                                        onHorizontalDrag = { change, dragAmount ->
+                                            totalDrag += dragAmount
+                                            change.consume()
+                                        },
+                                        onDragEnd = {
+                                            if (abs(totalDrag) >= swipeThresholdPx) {
+                                                // Swipe left (negative) -> next page
+                                                // Swipe right (positive) -> previous page
+                                                if (totalDrag < 0f) onNext() else onPrev()
+                                            }
+                                            totalDrag = 0f
+                                        },
+                                        onDragCancel = { totalDrag = 0f },
+                                    )
+                                }
+                                .verticalScroll(scrollState)
                                 .padding(horizontal = 22.dp, vertical = 18.dp),
                         ) {
                             Text(
