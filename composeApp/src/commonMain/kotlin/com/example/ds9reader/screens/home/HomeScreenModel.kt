@@ -11,7 +11,6 @@ import com.example.ds9reader.domain.VirtualLibraries
 import com.example.ds9reader.domain.VirtualLibrary
 import com.example.ds9reader.domain.hasTag
 import com.example.ds9reader.domain.preferredTagChips
-import com.example.ds9reader.domain.tagList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +21,7 @@ import arrow.core.Either
 enum class LibrarySort {
     Title,
     Author,
+    Recent,
 }
 
 data class HomeUiState(
@@ -43,6 +43,25 @@ data class HomeUiState(
 
     val virtualLibraries: List<VirtualLibrary>
         get() = VirtualLibraries.all
+
+    val readingBooks: List<Book>
+        get() {
+            val fromProgress = books.filter { it.progress > 0f && it.progress < 0.99f }
+            return if (fromProgress.isNotEmpty()) {
+                fromProgress.sortedByDescending { it.lastOpenedAt.orEmpty() }
+            } else {
+                continueReading.sortedByDescending { it.lastOpenedAt.orEmpty() }
+            }
+        }
+
+    val downloadedBooks: List<Book>
+        get() = books
+            .filter { it.isDownloaded }
+            .sortedWith { a, b ->
+                val recent = b.lastOpenedAt.orEmpty().compareTo(a.lastOpenedAt.orEmpty())
+                if (recent != 0) recent
+                else a.title.compareTo(b.title, ignoreCase = true)
+            }
 
     val filteredBooks: List<Book>
         get() {
@@ -66,6 +85,7 @@ data class HomeUiState(
                         .compareTo(b.author.ifBlank { "Unknown author" }, ignoreCase = true)
                     if (authorCmp != 0) authorCmp else a.title.compareTo(b.title, ignoreCase = true)
                 }
+                LibrarySort.Recent -> list.sortedByDescending { it.lastOpenedAt.orEmpty() }
             }
             return sorted.toList()
         }

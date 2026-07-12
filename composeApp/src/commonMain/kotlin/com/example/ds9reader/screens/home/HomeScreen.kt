@@ -3,6 +3,7 @@ package com.example.ds9reader.screens.home
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,148 +22,183 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import com.example.ds9reader.domain.Book
 import com.example.ds9reader.domain.CalibreConfig
-import com.example.ds9reader.domain.LibraryRepository
-import com.example.ds9reader.domain.SyncWithCalibreUseCase
 import com.example.ds9reader.domain.VirtualLibrary
 import com.example.ds9reader.domain.tagList
-import com.example.ds9reader.screens.reader.ReaderScreen
 import com.example.ds9reader.ui.CoverImage
-import org.koin.compose.koinInject
 
-object HomeScreen : Screen {
-    override val key: String = "home"
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LibraryTabContent(
+    state: HomeUiState,
+    model: HomeScreenModel,
+    showSettings: Boolean,
+    onShowSettings: (Boolean) -> Unit,
+    contentPadding: PaddingValues,
+    onOpenBook: (Book) -> Unit,
+) {
+    if (showSettings) {
+        CalibreSettingsDialog(
+            config = state.config,
+            onDismiss = { onShowSettings(false) },
+            onSave = {
+                model.saveConfig(it)
+                onShowSettings(false)
+            },
+        )
+    }
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    override fun Content() {
-        val repository = koinInject<LibraryRepository>()
-        val syncUseCase = koinInject<SyncWithCalibreUseCase>()
-        val model = rememberScreenModel { HomeScreenModel(repository, syncUseCase) }
-        val state by model.uiState.collectAsState()
-        val navigator = LocalNavigator.currentOrThrow
-        var showSettings by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        TopAppBar(
+            title = { Text("Library") },
+            actions = {
+                TextButton(onClick = model::syncLibrary, enabled = !state.isSyncing) {
+                    Text(if (state.isSyncing) "Syncing..." else "Sync")
+                }
+                TextButton(onClick = { onShowSettings(true) }) { Text("Calibre") }
+            },
+        )
 
-        if (showSettings) {
-            CalibreSettingsDialog(
-                config = state.config,
-                onDismiss = { showSettings = false },
-                onSave = {
-                    model.saveConfig(it)
-                    showSettings = false
-                },
-            )
+        if (state.error != null) {
+            Text(state.error ?: "", color = MaterialTheme.colorScheme.error)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (state.statusMessage != null) {
+            Text(state.statusMessage ?: "")
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("DS9 Reader") },
-                    actions = {
-                        TextButton(onClick = model::syncLibrary, enabled = !state.isSyncing) {
-                            Text(if (state.isSyncing) "Syncing..." else "Sync")
-                        }
-                        TextButton(onClick = { showSettings = true }) { Text("Calibre") }
-                    },
-                )
+        Text(
+            if (state.config.isConfigured) {
+                "Calibre: ${state.config.baseUrl}"
+            } else {
+                "Connect your Calibre Content Server to download books and sync progress."
             },
-        ) { padding ->
-            Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-                if (state.error != null) {
-                    Text(state.error ?: "", color = MaterialTheme.colorScheme.error)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                if (state.statusMessage != null) {
-                    Text(state.statusMessage ?: "")
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
 
-                Text(
-                    if (state.config.isConfigured) {
-                        "Calibre: ${state.config.baseUrl}"
-                    } else {
-                        "Connect your Calibre Content Server to download books and sync progress."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
+        if (state.isLoading) {
+            Text("Loading library...")
+        } else if (state.books.isEmpty()) {
+            Text("Library is empty")
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = model::syncLibrary) { Text("Sync Calibre library") }
+            TextButton(onClick = { onShowSettings(true) }) { Text("Server settings") }
+        } else {
+            VirtualLibraryRow(
+                libraries = state.virtualLibraries,
+                selectedId = state.selectedLibraryId,
+                counts = state.libraryCounts,
+                onSelect = model::setVirtualLibrary,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (state.availableTags.isNotEmpty()) {
+                TagFilterRow(
+                    tags = state.availableTags,
+                    selectedTag = state.selectedTag,
+                    onSelect = model::setTagFilter,
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
-                if (state.isLoading) {
-                    Text("Loading library...")
-                } else if (state.books.isEmpty()) {
-                    Text("Library is empty")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(onClick = model::syncLibrary) { Text("Sync Calibre library") }
-                    TextButton(onClick = { showSettings = true }) { Text("Server settings") }
-                } else {
-                    VirtualLibraryRow(
-                        libraries = state.virtualLibraries,
-                        selectedId = state.selectedLibraryId,
-                        counts = state.libraryCounts,
-                        onSelect = model::setVirtualLibrary,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+            SortRow(
+                sort = state.sort,
+                visibleCount = state.filteredBooks.size,
+                totalCount = state.books.size,
+                selectedLibrary = state.selectedLibrary.name,
+                selectedTag = state.selectedTag,
+                onSort = model::setSort,
+                onClear = model::clearFilters,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
 
-                    if (state.availableTags.isNotEmpty()) {
-                        TagFilterRow(
-                            tags = state.availableTags,
-                            selectedTag = state.selectedTag,
-                            onSelect = model::setTagFilter,
+            if (state.filteredBooks.isEmpty()) {
+                Text("No books match this filter.")
+                TextButton(onClick = model::clearFilters) { Text("Clear filters") }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(state.filteredBooks, key = { it.id }) { book ->
+                        BookRow(
+                            book = book,
+                            config = state.config,
+                            downloading = book.id in state.downloadingIds,
+                            onOpen = { onOpenBook(book) },
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
                     }
+                }
+            }
+        }
+    }
+}
 
-                    SortRow(
-                        sort = state.sort,
-                        visibleCount = state.filteredBooks.size,
-                        totalCount = state.books.size,
-                        selectedLibrary = state.selectedLibrary.name,
-                        selectedTag = state.selectedTag,
-                        onSort = model::setSort,
-                        onClear = model::clearFilters,
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SimpleBookListContent(
+    title: String,
+    subtitle: String,
+    books: List<Book>,
+    state: HomeUiState,
+    model: HomeScreenModel,
+    emptyText: String,
+    contentPadding: PaddingValues,
+    onOpenBook: (Book) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        TopAppBar(
+            title = { Text(title) },
+            actions = {
+                TextButton(onClick = model::syncLibrary, enabled = !state.isSyncing) {
+                    Text(if (state.isSyncing) "Syncing..." else "Sync")
+                }
+            },
+        )
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "${books.size} books",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (state.isLoading) {
+            Text("Loading...")
+        } else if (books.isEmpty()) {
+            Text(emptyText)
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(books, key = { it.id }) { book ->
+                    BookRow(
+                        book = book,
+                        config = state.config,
+                        downloading = book.id in state.downloadingIds,
+                        onOpen = { onOpenBook(book) },
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (state.filteredBooks.isEmpty()) {
-                        Text("No books match this filter.")
-                        TextButton(onClick = model::clearFilters) { Text("Clear filters") }
-                    } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(state.filteredBooks, key = { it.id }) { book ->
-                                BookRow(
-                                    book = book,
-                                    config = state.config,
-                                    downloading = book.id in state.downloadingIds,
-                                    onOpen = {
-                                        if (book.isDownloaded) {
-                                            navigator.push(ReaderScreen(book.id))
-                                        } else {
-                                            model.download(book.id)
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -251,6 +287,11 @@ private fun SortRow(
                 onClick = { onSort(LibrarySort.Author) },
                 label = { Text("Author") },
             )
+            FilterChip(
+                selected = sort == LibrarySort.Recent,
+                onClick = { onSort(LibrarySort.Recent) },
+                label = { Text("Recent") },
+            )
         }
         val filterSummary = buildString {
             append(selectedLibrary)
@@ -273,7 +314,7 @@ private fun SortRow(
 }
 
 @Composable
-private fun BookRow(
+fun BookRow(
     book: Book,
     config: CalibreConfig,
     downloading: Boolean,
@@ -340,7 +381,7 @@ private fun BookRow(
 }
 
 @Composable
-private fun CalibreSettingsDialog(
+fun CalibreSettingsDialog(
     config: CalibreConfig,
     onDismiss: () -> Unit,
     onSave: (CalibreConfig) -> Unit,
