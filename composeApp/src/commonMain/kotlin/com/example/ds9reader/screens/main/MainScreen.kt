@@ -31,6 +31,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.SyncWithCalibreUseCase
 import com.example.ds9reader.domain.ThemeMode
+import com.example.ds9reader.platform.openBookWithPlatformReader
 import com.example.ds9reader.screens.home.HomeScreenModel
 import com.example.ds9reader.screens.home.LibraryTabContent
 import com.example.ds9reader.screens.home.SimpleBookListContent
@@ -136,7 +137,9 @@ data class MainScreen(
                         contentPadding = padding,
                         onOpenBook = { book ->
                             if (book.isDownloaded) {
-                                navigator.push(ReaderScreen(book.id))
+                                if (!openBookWithPlatformReader(book)) {
+                                    navigator.push(ReaderScreen(book.id))
+                                }
                             } else {
                                 model.download(book.id)
                             }
@@ -154,7 +157,9 @@ data class MainScreen(
                         contentPadding = padding,
                         onOpenBook = { book ->
                             if (book.isDownloaded) {
-                                navigator.push(ReaderScreen(book.id))
+                                if (!openBookWithPlatformReader(book)) {
+                                    navigator.push(ReaderScreen(book.id))
+                                }
                             } else {
                                 model.download(book.id)
                             }
@@ -171,7 +176,9 @@ data class MainScreen(
                         emptyText = "No downloaded books yet. Sync your library and download titles from Library.",
                         contentPadding = padding,
                         onOpenBook = { book ->
-                            navigator.push(ReaderScreen(book.id))
+                            if (!openBookWithPlatformReader(book)) {
+                                navigator.push(ReaderScreen(book.id))
+                            }
                         },
                     )
                 }

@@ -87,10 +87,16 @@ kotlin {
                 implementation(compose.preview)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.fragment.ktx)
+                implementation(libs.androidx.appcompat)
                 implementation(libs.sqldelight.android.driver)
                 implementation(libs.ktor.client.okhttp)
                 implementation(libs.koin.android)
                 implementation(libs.koin.androidx.compose)
+
+                // Readium EPUB engine (Android-only experiment)
+                implementation(libs.readium.shared)
+                implementation(libs.readium.streamer)
+                implementation(libs.readium.navigator)
             }
         }
 
@@ -140,8 +146,8 @@ android {
         applicationId = "com.example.ds9reader"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 9
-        versionName = "0.4.2"
+        versionCode = 10
+        versionName = "0.5.0-readium"
     }
     packaging {
         resources {

@@ -19,6 +19,7 @@ actual fun platformModule(): Module = module {
             name = "ds9_reader.db",
         )
     }
+    single<android.content.Context> { androidContext() }
     single<BookStorage> { AndroidBookStorage(androidContext()) }
     single<FilePicker> { AndroidFilePicker(androidContext()) }
 }
