@@ -1,45 +1,55 @@
 package com.example.ds9reader.screens.main
 
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.SettingsBrightness
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.SyncWithCalibreUseCase
+import com.example.ds9reader.domain.ThemeMode
 import com.example.ds9reader.screens.home.HomeScreenModel
 import com.example.ds9reader.screens.home.LibraryTabContent
 import com.example.ds9reader.screens.home.SimpleBookListContent
 import com.example.ds9reader.screens.reader.ReaderScreen
 import org.koin.compose.koinInject
 
-enum class MainTab(
-    val label: String,
-) {
-    Library("Library"),
-    Reading("Reading"),
-    Downloaded("Downloaded"),
+enum class MainTab {
+    Library,
+    Reading,
+    Downloaded,
 }
 
-object MainScreen : Screen {
+data class MainScreen(
+    val themeMode: ThemeMode,
+    val onCycleTheme: () -> Unit,
+) : Screen {
     override val key: String = "main"
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val repository = koinInject<LibraryRepository>()
@@ -51,6 +61,42 @@ object MainScreen : Screen {
         var showSettings by remember { mutableStateOf(false) }
 
         Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            when (tab) {
+                                MainTab.Library -> "Library"
+                                MainTab.Reading -> "Currently Reading"
+                                MainTab.Downloaded -> "Downloaded"
+                            },
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = onCycleTheme) {
+                            Icon(
+                                imageVector = when (themeMode) {
+                                    ThemeMode.System -> Icons.Outlined.SettingsBrightness
+                                    ThemeMode.Light -> Icons.Outlined.LightMode
+                                    ThemeMode.Dark -> Icons.Outlined.DarkMode
+                                },
+                                contentDescription = "Theme: ${themeMode.name}",
+                            )
+                        }
+                        TextButton(onClick = model::syncLibrary, enabled = !state.isSyncing) {
+                            Text(if (state.isSyncing) "Syncing..." else "Sync")
+                        }
+                        if (tab == MainTab.Library) {
+                            TextButton(onClick = { showSettings = true }) {
+                                Text("Calibre")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                )
+            },
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(

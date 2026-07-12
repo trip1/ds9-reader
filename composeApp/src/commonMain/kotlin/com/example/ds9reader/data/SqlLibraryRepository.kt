@@ -10,6 +10,7 @@ import com.example.ds9reader.domain.CalibreConfig
 import com.example.ds9reader.domain.LibraryError
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.ReadingSession
+import com.example.ds9reader.domain.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
@@ -259,6 +260,20 @@ class SqlLibraryRepository(
             db.markSyncClean(bookId)
         }.toUnitEither()
     }
+
+    override suspend fun getThemeMode(): ThemeMode = withContext(Dispatchers.IO) {
+        runCatching {
+            val value = db.getAppSetting("theme_mode").executeAsOneOrNull()
+            ThemeMode.fromStorage(value)
+        }.getOrDefault(ThemeMode.System)
+    }
+
+    override suspend fun setThemeMode(mode: ThemeMode): Either<LibraryError, Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                db.upsertAppSetting(key = "theme_mode", value_ = mode.name)
+            }.toUnitEither()
+        }
 
     private fun com.example.ds9reader.database.Book.toDomain(): Book = Book(
         id = id,

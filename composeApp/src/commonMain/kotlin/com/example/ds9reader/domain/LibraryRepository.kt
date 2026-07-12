@@ -1,6 +1,7 @@
 package com.example.ds9reader.domain
 
 import arrow.core.Either
+import kotlinx.coroutines.flow.StateFlow
 
 interface LibraryRepository {
     suspend fun getAllBooks(): Either<LibraryError, List<Book>>
@@ -38,4 +39,7 @@ interface LibraryRepository {
         spineIndex: Int,
         anchor: String,
     ): Either<LibraryError, Unit>
+
+    suspend fun getThemeMode(): ThemeMode
+    suspend fun setThemeMode(mode: ThemeMode): Either<LibraryError, Unit>
 }

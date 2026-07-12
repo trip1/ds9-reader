@@ -1,5 +1,6 @@
 package com.example.ds9reader.screens.reader
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,9 +24,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,11 +52,12 @@ import com.example.ds9reader.domain.LibraryError
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.OpenBookUseCase
 import com.example.ds9reader.domain.SyncWithCalibreUseCase
+import com.example.ds9reader.ui.EmptyState
+import com.example.ds9reader.ui.LoadingState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import arrow.core.Either
-
 
 data class ReaderScreen(
     val bookId: String,
@@ -180,6 +183,7 @@ private fun ReaderContent(
     onFontScale: (Float) -> Unit,
 ) {
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             if (controlsVisible) {
                 TopAppBar(
@@ -188,7 +192,12 @@ private fun ReaderContent(
                             Text(book?.title ?: "Reading", maxLines = 1)
                             val chapterTitle = document?.chapters?.getOrNull(chapterIndex)?.title
                             if (chapterTitle != null) {
-                                Text(chapterTitle, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                Text(
+                                    chapterTitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
                             }
                         }
                     },
@@ -227,6 +236,9 @@ private fun ReaderContent(
                             }
                         }
                     },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
                 )
             }
         },
@@ -234,99 +246,90 @@ private fun ReaderContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.background),
         ) {
-            if (loading) {
-                LoadingCenter()
-            } else if (error != null) {
-                ErrorCenter(error)
-            } else if (document != null) {
-                val chapter = document.chapters.getOrNull(chapterIndex)
-                val progress = if (document.chapters.size <= 1) {
-                    if (chapter == null) 0f else 1f
-                } else {
-                    chapterIndex.toFloat() / (document.chapters.size - 1).toFloat()
-                }
-
-                Column(modifier = Modifier.fillMaxSize()) {
-                    if (controlsVisible) {
-                        LinearProgressIndicator(
-                            progress = { progress.coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+            when {
+                loading -> LoadingState("Opening book...")
+                error != null -> EmptyState(
+                    title = "Unable to open",
+                    message = error,
+                    action = {
+                        TextButton(onClick = onBack) { Text("Go back") }
+                    },
+                )
+                document != null -> {
+                    val chapter = document.chapters.getOrNull(chapterIndex)
+                    val progress = if (document.chapters.size <= 1) {
+                        if (chapter == null) 0f else 1f
+                    } else {
+                        chapterIndex.toFloat() / (document.chapters.size - 1).toFloat()
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .pointerInput(chapterIndex) {
-                                detectTapGestures { offset ->
-                                    val third = size.width / 3f
-                                    when {
-                                        offset.x < third -> onPrev()
-                                        offset.x > size.width - third -> onNext()
-                                        else -> onToggleControls()
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (controlsVisible) {
+                            LinearProgressIndicator(
+                                progress = { progress.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .pointerInput(chapterIndex) {
+                                    detectTapGestures { offset ->
+                                        val third = size.width / 3f
+                                        when {
+                                            offset.x < third -> onPrev()
+                                            offset.x > size.width - third -> onNext()
+                                            else -> onToggleControls()
+                                        }
+                                    }
+                                }
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 22.dp, vertical = 18.dp),
+                        ) {
+                            Text(
+                                text = chapter?.html.orEmpty(),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (18f * fontScale).sp,
+                                    lineHeight = (30f * fontScale).sp,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                ),
+                            )
+                        }
+
+                        if (controlsVisible) {
+                            Surface(tonalElevation = 2.dp) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(onClick = onPrev, enabled = chapterIndex > 0) {
+                                        Text("Previous")
+                                    }
+                                    Text(
+                                        text = "${chapterIndex + 1} / ${document.chapters.size}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    TextButton(
+                                        onClick = onNext,
+                                        enabled = chapterIndex < document.chapters.lastIndex,
+                                    ) {
+                                        Text("Next")
                                     }
                                 }
                             }
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                    ) {
-                        Text(
-                            text = chapter?.html.orEmpty(),
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = (18f * fontScale).sp,
-                                lineHeight = (28f * fontScale).sp,
-                            ),
-                        )
-                    }
-
-                    if (controlsVisible) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            TextButton(onClick = onPrev, enabled = chapterIndex > 0) { Text("Previous") }
-                            Text(
-                                text = "${chapterIndex + 1} / ${document.chapters.size}",
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                            TextButton(
-                                onClick = onNext,
-                                enabled = chapterIndex < document.chapters.lastIndex,
-                            ) { Text("Next") }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun LoadingCenter() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun ErrorCenter(message: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = message,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(24.dp),
-        )
     }
 }

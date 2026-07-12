@@ -152,3 +152,14 @@ UPDATE SyncState SET dirty = 0, last_synced_at = datetime('now') WHERE book_id =
 
 markSyncDirty:
 UPDATE SyncState SET dirty = 1 WHERE book_id = ?;
+
+CREATE TABLE AppSetting (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+getAppSetting:
+SELECT value FROM AppSetting WHERE key = ?;
+
+upsertAppSetting:
+INSERT OR REPLACE INTO AppSetting (key, value) VALUES (?, ?);
