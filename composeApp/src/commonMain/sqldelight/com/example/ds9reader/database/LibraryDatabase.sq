@@ -86,7 +86,7 @@ INSERT OR REPLACE INTO Book (
     id, title, author, cover_url, file_path, file_size, added_at,
     progress, current_spine_index, current_anchor, total_chapters,
     calibre_id, calibre_uuid, is_downloaded, description, series, tags
-) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 0.0, 0, '', 0, ?, ?, 0, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateBookProgress:
 UPDATE Book

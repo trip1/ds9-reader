@@ -1,5 +1,6 @@
 package com.example.ds9reader.screens.home
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,6 +43,8 @@ import com.example.ds9reader.domain.Book
 import com.example.ds9reader.domain.CalibreConfig
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.SyncWithCalibreUseCase
+import com.example.ds9reader.domain.VirtualLibrary
+import com.example.ds9reader.domain.tagList
 import com.example.ds9reader.screens.reader.ReaderScreen
 import com.example.ds9reader.ui.CoverImage
 import org.koin.compose.koinInject
@@ -110,26 +114,53 @@ object HomeScreen : Screen {
                     Button(onClick = model::syncLibrary) { Text("Sync Calibre library") }
                     TextButton(onClick = { showSettings = true }) { Text("Server settings") }
                 } else {
-                    SortRow(
-                        sort = state.sort,
-                        bookCount = state.books.size,
-                        onSort = model::setSort,
+                    VirtualLibraryRow(
+                        libraries = state.virtualLibraries,
+                        selectedId = state.selectedLibraryId,
+                        counts = state.libraryCounts,
+                        onSelect = model::setVirtualLibrary,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(state.sortedBooks, key = { it.id }) { book ->
-                            BookRow(
-                                book = book,
-                                config = state.config,
-                                downloading = book.id in state.downloadingIds,
-                                onOpen = {
-                                    if (book.isDownloaded) {
-                                        navigator.push(ReaderScreen(book.id))
-                                    } else {
-                                        model.download(book.id)
-                                    }
-                                },
-                            )
+
+                    if (state.availableTags.isNotEmpty()) {
+                        TagFilterRow(
+                            tags = state.availableTags,
+                            selectedTag = state.selectedTag,
+                            onSelect = model::setTagFilter,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    SortRow(
+                        sort = state.sort,
+                        visibleCount = state.filteredBooks.size,
+                        totalCount = state.books.size,
+                        selectedLibrary = state.selectedLibrary.name,
+                        selectedTag = state.selectedTag,
+                        onSort = model::setSort,
+                        onClear = model::clearFilters,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (state.filteredBooks.isEmpty()) {
+                        Text("No books match this filter.")
+                        TextButton(onClick = model::clearFilters) { Text("Clear filters") }
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(state.filteredBooks, key = { it.id }) { book ->
+                                BookRow(
+                                    book = book,
+                                    config = state.config,
+                                    downloading = book.id in state.downloadingIds,
+                                    onOpen = {
+                                        if (book.isDownloaded) {
+                                            navigator.push(ReaderScreen(book.id))
+                                        } else {
+                                            model.download(book.id)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -139,32 +170,105 @@ object HomeScreen : Screen {
 }
 
 @Composable
+private fun VirtualLibraryRow(
+    libraries: List<VirtualLibrary>,
+    selectedId: String,
+    counts: Map<String, Int>,
+    onSelect: (String) -> Unit,
+) {
+    Column {
+        Text("Virtual libraries", style = MaterialTheme.typography.labelLarge)
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            libraries.forEach { library ->
+                val count = counts[library.id] ?: 0
+                FilterChip(
+                    selected = selectedId == library.id,
+                    onClick = { onSelect(library.id) },
+                    label = { Text("${library.name} ($count)") },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagFilterRow(
+    tags: List<String>,
+    selectedTag: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Column {
+        Text("Tags", style = MaterialTheme.typography.labelLarge)
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            tags.forEach { tag ->
+                FilterChip(
+                    selected = selectedTag.equals(tag, ignoreCase = true),
+                    onClick = { onSelect(tag) },
+                    label = { Text(tag) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SortRow(
     sort: LibrarySort,
-    bookCount: Int,
+    visibleCount: Int,
+    totalCount: Int,
+    selectedLibrary: String,
+    selectedTag: String?,
     onSort: (LibrarySort) -> Unit,
+    onClear: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = "$bookCount books",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        FilterChip(
-            selected = sort == LibrarySort.Title,
-            onClick = { onSort(LibrarySort.Title) },
-            label = { Text("Title") },
-        )
-        FilterChip(
-            selected = sort == LibrarySort.Author,
-            onClick = { onSort(LibrarySort.Author) },
-            label = { Text("Author") },
-        )
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "$visibleCount of $totalCount",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            FilterChip(
+                selected = sort == LibrarySort.Title,
+                onClick = { onSort(LibrarySort.Title) },
+                label = { Text("Title") },
+            )
+            FilterChip(
+                selected = sort == LibrarySort.Author,
+                onClick = { onSort(LibrarySort.Author) },
+                label = { Text("Author") },
+            )
+        }
+        val filterSummary = buildString {
+            append(selectedLibrary)
+            if (!selectedTag.isNullOrBlank()) append(" · tag: $selectedTag")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = filterSummary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (selectedLibrary != "All Books" || !selectedTag.isNullOrBlank()) {
+                TextButton(onClick = onClear) { Text("Clear") }
+            }
+        }
     }
 }
 
@@ -199,6 +303,16 @@ private fun BookRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val tags = book.tagList().take(3)
+                if (tags.isNotEmpty()) {
+                    Text(
+                        text = tags.joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (book.progress > 0f) {
                     Spacer(modifier = Modifier.height(6.dp))
                     LinearProgressIndicator(

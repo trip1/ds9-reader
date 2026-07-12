@@ -45,15 +45,22 @@ class SqlLibraryRepository(
 
     override suspend fun upsertCalibreBook(book: Book): Either<LibraryError, Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            val existing = db.getBookById(book.id).executeAsOneOrNull()
             db.upsertCalibreBook(
                 id = book.id,
                 title = book.title,
                 author = book.author,
                 cover_url = book.coverUrl,
-                file_path = book.filePath,
-                file_size = book.fileSize,
+                file_path = existing?.file_path ?: book.filePath,
+                file_size = existing?.file_size ?: book.fileSize,
+                added_at = existing?.added_at ?: book.addedAt.ifBlank { "" },
+                progress = existing?.progress ?: book.progress.toDouble(),
+                current_spine_index = existing?.current_spine_index ?: book.currentSpineIndex.toLong(),
+                current_anchor = existing?.current_anchor ?: book.currentAnchor,
+                total_chapters = existing?.total_chapters ?: book.totalChapters.toLong(),
                 calibre_id = book.calibreId,
                 calibre_uuid = book.calibreUuid,
+                is_downloaded = existing?.is_downloaded ?: if (book.isDownloaded) 1 else 0,
                 description = book.description,
                 series = book.series,
                 tags = book.tags,

@@ -7,6 +7,11 @@ import com.example.ds9reader.domain.CalibreConfig
 import com.example.ds9reader.domain.LibraryError
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.SyncWithCalibreUseCase
+import com.example.ds9reader.domain.VirtualLibraries
+import com.example.ds9reader.domain.VirtualLibrary
+import com.example.ds9reader.domain.hasTag
+import com.example.ds9reader.domain.preferredTagChips
+import com.example.ds9reader.domain.tagList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,24 +30,49 @@ data class HomeUiState(
     val continueReading: List<Book> = emptyList(),
     val config: CalibreConfig = CalibreConfig(),
     val sort: LibrarySort = LibrarySort.Title,
+    val selectedLibraryId: String = "all",
+    val selectedTag: String? = null,
+    val availableTags: List<String> = emptyList(),
     val statusMessage: String? = null,
     val error: String? = null,
     val isSyncing: Boolean = false,
     val downloadingIds: Set<String> = emptySet(),
 ) {
-    val sortedBooks: List<Book>
-        get() = when (sort) {
-            LibrarySort.Title -> books.sortedWith { a, b ->
-                val titleCmp = a.title.ifBlank { "Untitled" }.compareTo(b.title.ifBlank { "Untitled" }, ignoreCase = true)
-                if (titleCmp != 0) titleCmp
-                else a.author.compareTo(b.author, ignoreCase = true)
+    val selectedLibrary: VirtualLibrary
+        get() = VirtualLibraries.byId(selectedLibraryId)
+
+    val virtualLibraries: List<VirtualLibrary>
+        get() = VirtualLibraries.all
+
+    val filteredBooks: List<Book>
+        get() {
+            var list = books.asSequence()
+            val library = selectedLibrary
+            if (library.id != "all") {
+                list = list.filter(library.matcher)
             }
-            LibrarySort.Author -> books.sortedWith { a, b ->
-                val authorCmp = a.author.ifBlank { "Unknown author" }
-                    .compareTo(b.author.ifBlank { "Unknown author" }, ignoreCase = true)
-                if (authorCmp != 0) authorCmp
-                else a.title.compareTo(b.title, ignoreCase = true)
+            val tag = selectedTag
+            if (!tag.isNullOrBlank()) {
+                list = list.filter { it.hasTag(tag) }
             }
+            val sorted = when (sort) {
+                LibrarySort.Title -> list.sortedWith { a, b ->
+                    val titleCmp = a.title.ifBlank { "Untitled" }
+                        .compareTo(b.title.ifBlank { "Untitled" }, ignoreCase = true)
+                    if (titleCmp != 0) titleCmp else a.author.compareTo(b.author, ignoreCase = true)
+                }
+                LibrarySort.Author -> list.sortedWith { a, b ->
+                    val authorCmp = a.author.ifBlank { "Unknown author" }
+                        .compareTo(b.author.ifBlank { "Unknown author" }, ignoreCase = true)
+                    if (authorCmp != 0) authorCmp else a.title.compareTo(b.title, ignoreCase = true)
+                }
+            }
+            return sorted.toList()
+        }
+
+    val libraryCounts: Map<String, Int>
+        get() = virtualLibraries.associate { vl ->
+            vl.id to if (vl.id == "all") books.size else books.count(vl.matcher)
         }
 }
 
@@ -74,12 +104,14 @@ class HomeScreenModel(
                         is Either.Right -> c.value
                         is Either.Left -> CalibreConfig()
                     }
+                    val books = booksResult.value
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            books = booksResult.value,
+                            books = books,
                             continueReading = cont,
                             config = config,
+                            availableTags = preferredTagChips(books),
                         )
                     }
                 }
@@ -89,6 +121,25 @@ class HomeScreenModel(
 
     fun setSort(sort: LibrarySort) {
         _uiState.update { it.copy(sort = sort) }
+    }
+
+    fun setVirtualLibrary(libraryId: String) {
+        _uiState.update { it.copy(selectedLibraryId = libraryId) }
+    }
+
+    fun setTagFilter(tag: String?) {
+        _uiState.update { current ->
+            val next = if (tag != null && current.selectedTag.equals(tag, ignoreCase = true)) {
+                null
+            } else {
+                tag
+            }
+            current.copy(selectedTag = next)
+        }
+    }
+
+    fun clearFilters() {
+        _uiState.update { it.copy(selectedLibraryId = "all", selectedTag = null) }
     }
 
     fun saveConfig(config: CalibreConfig) {
