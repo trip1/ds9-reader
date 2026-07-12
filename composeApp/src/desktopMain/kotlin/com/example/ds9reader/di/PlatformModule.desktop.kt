@@ -1,5 +1,6 @@
 package com.example.ds9reader.di
 
+import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.example.ds9reader.database.LibraryDatabase
 import com.example.ds9reader.domain.BookStorage
@@ -11,11 +12,14 @@ import org.koin.dsl.module
 import java.io.File
 
 actual fun platformModule(): Module = module {
-    single {
+    single<SqlDriver> {
         val dbFile = File(System.getProperty("user.home"), ".ds9-reader/library.db")
         dbFile.parentFile?.mkdirs()
+        val needsCreate = !dbFile.exists()
         val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
-        LibraryDatabase.Schema.create(driver)
+        if (needsCreate) {
+            LibraryDatabase.Schema.create(driver)
+        }
         driver
     }
     single<BookStorage> {

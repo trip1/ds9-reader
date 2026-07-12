@@ -13,8 +13,7 @@ import com.example.ds9reader.domain.ReadingSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
+import kotlin.random.Random
 
 class SqlLibraryRepository(
     database: LibraryDatabase,
@@ -128,12 +127,11 @@ class SqlLibraryRepository(
             }.toListEither()
         }
 
-    @OptIn(ExperimentalUuidApi::class)
     override suspend fun addBookmark(bookmark: Bookmark): Either<LibraryError, Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
                 db.insertBookmark(
-                    id = bookmark.id.ifBlank { Uuid.random().toString() },
+                    id = bookmark.id.ifBlank { randomId() },
                     book_id = bookmark.bookId,
                     spine_index = bookmark.spineIndex.toLong(),
                     anchor = bookmark.anchor,
@@ -147,10 +145,9 @@ class SqlLibraryRepository(
             runCatching { db.deleteBookmark(id) }.toUnitEither()
         }
 
-    @OptIn(ExperimentalUuidApi::class)
     override suspend fun startSession(bookId: String, anchor: String): Either<LibraryError, String> =
         withContext(Dispatchers.IO) {
-            val sessionId = Uuid.random().toString()
+            val sessionId = randomId()
             runCatching {
                 db.insertSession(id = sessionId, book_id = bookId, start_anchor = anchor)
             }.fold(
@@ -286,4 +283,11 @@ class SqlLibraryRepository(
         onSuccess = { Unit.right() },
         onFailure = { LibraryError.Storage(it.message ?: "Unknown error").left() },
     )
+
+    private fun randomId(): String =
+        buildString(20) {
+            repeat(20) {
+                append(Random.nextInt(0, 16).toString(16))
+            }
+        }
 }

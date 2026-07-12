@@ -42,7 +42,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.core.screen.uniqueScreenKey
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.example.ds9reader.domain.Book
@@ -60,7 +59,7 @@ import arrow.core.Either
 data class ReaderScreen(
     val bookId: String,
 ) : Screen {
-    override val key = uniqueScreenKey
+    override val key: String = "reader-$bookId"
 
     @Composable
     override fun Content() {

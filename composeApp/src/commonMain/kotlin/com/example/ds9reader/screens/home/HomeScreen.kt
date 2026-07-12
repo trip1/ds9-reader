@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.core.screen.uniqueScreenKey
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.example.ds9reader.domain.Book
@@ -41,7 +41,8 @@ import com.example.ds9reader.screens.reader.ReaderScreen
 import org.koin.compose.koinInject
 
 object HomeScreen : Screen {
-    override val key = uniqueScreenKey
+    // Stable key so Voyager does not recreate the screen unexpectedly.
+    override val key: String = "home"
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -70,7 +71,7 @@ object HomeScreen : Screen {
                     title = { Text("DS9 Reader") },
                     actions = {
                         TextButton(onClick = model::syncLibrary, enabled = !state.isSyncing) {
-                            Text(if (state.isSyncing) "Syncing…" else "Sync")
+                            Text(if (state.isSyncing) "Syncing..." else "Sync")
                         }
                         TextButton(onClick = { showSettings = true }) { Text("Calibre") }
                     },
@@ -88,13 +89,18 @@ object HomeScreen : Screen {
                 }
 
                 Text(
-                    if (state.config.isConfigured) "Calibre: ${state.config.baseUrl}"
-                    else "Connect your Calibre Content Server to download books and sync progress.",
+                    if (state.config.isConfigured) {
+                        "Calibre: ${state.config.baseUrl}"
+                    } else {
+                        "Connect your Calibre Content Server to download books and sync progress."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (state.books.isEmpty()) {
+                if (state.isLoading) {
+                    Text("Loading library...")
+                } else if (state.books.isEmpty()) {
                     Text("Library is empty")
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = model::syncLibrary) { Text("Sync Calibre library") }
@@ -106,8 +112,11 @@ object HomeScreen : Screen {
                                 book = book,
                                 downloading = book.id in state.downloadingIds,
                                 onOpen = {
-                                    if (book.isDownloaded) navigator.push(ReaderScreen(book.id))
-                                    else model.download(book.id)
+                                    if (book.isDownloaded) {
+                                        navigator.push(ReaderScreen(book.id))
+                                    } else {
+                                        model.download(book.id)
+                                    }
                                 },
                             )
                         }
@@ -126,14 +135,17 @@ private fun BookRow(book: Book, downloading: Boolean, onOpen: () -> Unit) {
             Text(book.author.ifBlank { "Unknown author" }, style = MaterialTheme.typography.bodySmall)
             if (book.progress > 0f) {
                 Spacer(modifier = Modifier.height(6.dp))
-                LinearProgressIndicator(progress = { book.progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    progress = { book.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Text("${(book.progress * 100).toInt()}%")
             }
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = onOpen) {
                 Text(
                     when {
-                        downloading -> "Downloading…"
+                        downloading -> "Downloading..."
                         book.isDownloaded -> "Continue reading"
                         else -> "Download"
                     },
@@ -155,16 +167,46 @@ private fun CalibreSettingsDialog(
     var libraryId by remember(config) { mutableStateOf(config.libraryId) }
     var deviceName by remember(config) { mutableStateOf(config.deviceName) }
 
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Calibre Content Server") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it }, label = { Text("Server URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = libraryId, onValueChange = { libraryId = it }, label = { Text("Library ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = deviceName, onValueChange = { deviceName = it }, label = { Text("Device name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("Server URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("Username") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = libraryId,
+                    onValueChange = { libraryId = it },
+                    label = { Text("Library ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = deviceName,
+                    onValueChange = { deviceName = it },
+                    label = { Text("Device name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
         confirmButton = {
@@ -183,6 +225,8 @@ private fun CalibreSettingsDialog(
                 },
             ) { Text("Save") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
     )
 }

@@ -4,8 +4,6 @@ import app.cash.sqldelight.db.SqlDriver
 import com.example.ds9reader.calibre.CalibreClient
 import com.example.ds9reader.data.SqlLibraryRepository
 import com.example.ds9reader.database.LibraryDatabase
-import com.example.ds9reader.domain.BookStorage
-import com.example.ds9reader.domain.FilePicker
 import com.example.ds9reader.domain.LibraryRepository
 import com.example.ds9reader.domain.OpenBookUseCase
 import com.example.ds9reader.domain.SyncWithCalibreUseCase

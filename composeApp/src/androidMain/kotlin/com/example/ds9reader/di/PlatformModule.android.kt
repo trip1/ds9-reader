@@ -1,5 +1,6 @@
 package com.example.ds9reader.di
 
+import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import com.example.ds9reader.database.LibraryDatabase
 import com.example.ds9reader.domain.BookStorage
@@ -11,7 +12,7 @@ import org.koin.core.module.Module
 import org.koin.dsl.module
 
 actual fun platformModule(): Module = module {
-    single {
+    single<SqlDriver> {
         AndroidSqliteDriver(
             schema = LibraryDatabase.Schema,
             context = androidContext(),
